@@ -548,3 +548,56 @@ h3{font-size:19px;font-weight:800;margin:28px 0 6px}
 .an-grid .d-leg{width:100%}
 .d-zeile .p{white-space:nowrap}
 .teil-scores{gap:4px 16px}
+
+/* ---------- Buy the Dip, Zeichen, Mitteilungen ---------- */
+.dip-zeichen{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;margin-left:8px;vertical-align:-3px;flex:none}
+.dip-zeichen svg{width:14px;height:14px}
+.dip-zeichen.chance{background:rgba(48,209,88,.16);color:var(--up)}
+.dip-zeichen.beobachten{background:rgba(242,162,78,.16);color:var(--akzent-hell)}
+.dip-zeichen.messer{background:rgba(255,91,80,.16);color:var(--down)}
+.dip-zeichen.text{display:inline-flex;width:auto;gap:6px;padding:4px 11px 4px 8px;border-radius:999px;font-size:13px;font-weight:800;margin-left:0;vertical-align:middle;letter-spacing:0}
+.wp-name-zeile{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dip-karte{border:1px solid var(--linie-2)}
+.dip-karte.chance{border-color:rgba(48,209,88,.45);background:linear-gradient(135deg,rgba(48,209,88,.08),var(--karte) 55%)}
+.dip-karte.messer{border-color:rgba(255,91,80,.4);background:linear-gradient(135deg,rgba(255,91,80,.07),var(--karte) 55%)}
+.dip-karte.beobachten{border-color:rgba(242,162,78,.4)}
+.dip-oben{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.dip-gross{display:grid;gap:2px}
+.dip-gross b{font-size:34px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.dip-gross span{font-size:13px;font-weight:700;color:var(--ink-3)}
+.dip-text{font-size:16px;font-weight:700;flex:1;min-width:200px}
+.dip-pruef{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.dip-p{display:grid;grid-template-columns:24px 1fr;gap:8px;background:var(--karte-2);border-radius:14px;padding:11px 12px;align-items:start}
+.dip-p b{display:block;font-size:14px;font-weight:800}
+.dip-p span:not(.dip-i){display:block;font-size:12px;font-weight:600;color:var(--ink-3);line-height:1.35}
+.dip-i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800}
+.dip-p.ok .dip-i{background:rgba(48,209,88,.18);color:var(--up)}
+.dip-p.nein .dip-i{background:rgba(255,91,80,.16);color:var(--down)}
+.an-hinweis.warnung{color:var(--akzent-hell)}
+.info-tag{font-size:11px;font-weight:800;color:var(--ink-3);background:var(--karte-3);border-radius:6px;padding:3px 7px;justify-self:end}
+.dip-zeile{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px;margin:0 -12px;border-radius:18px;background:none;border:0;width:calc(100% + 24px);text-align:left;cursor:pointer;transition:background .15s}
+.dip-zeile:hover{background:var(--karte-2)}
+.dip-gross-icon{width:42px;height:42px;border-radius:50%;display:grid;place-items:center}
+.dip-gross-icon svg{width:22px;height:22px}
+.dip-zeile.chance .dip-gross-icon{background:rgba(48,209,88,.16);color:var(--up)}
+.dip-zeile.beobachten .dip-gross-icon{background:rgba(242,162,78,.16);color:var(--akzent-hell)}
+.dip-zeile.messer .dip-gross-icon{background:rgba(255,91,80,.16);color:var(--down)}
+.dip-zeile .t-klein{white-space:normal}
+.glocke{position:relative;width:50px;height:50px;border-radius:50%;border:0;background:var(--karte);color:var(--ink-2);cursor:pointer;display:grid;place-items:center;flex:none;transition:background .15s,color .15s}
+.glocke:hover{background:var(--karte-2);color:var(--ink)}
+.glocke svg{width:22px;height:22px}
+.zahl-punkt{position:absolute;top:6px;right:6px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--down);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid var(--bg)}
+.nav-zahl.rot{background:var(--down);color:#fff;border-radius:10px;padding:1px 7px}
+.plus-knopf{width:34px;height:34px;border-radius:50%;background:var(--karte-3);color:var(--ink);display:grid;place-items:center}
+.plus-knopf svg{width:18px;height:18px}
+.reihe.laedt{opacity:.6;pointer-events:none}
+.such-gruppe{font-size:12px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding:14px 0 4px}
+.meld-icon svg{width:22px;height:22px}
+.meld-icon.chance{background:rgba(48,209,88,.16) !important;color:var(--up) !important}
+.meld-icon.messer{background:rgba(255,91,80,.16) !important;color:var(--down) !important}
+.meld-icon.zahlen{background:rgba(242,162,78,.16) !important;color:var(--akzent-hell) !important}
+.meldung-reihe{grid-template-columns:48px minmax(0,1fr)}
+.meldung-reihe .r-detail{white-space:normal;line-height:1.4;margin:2px 0}
+.meldung-reihe.neu-m .r-titel::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--down);margin-left:8px;vertical-align:2px}
+@media (max-width:1100px){ .dip-pruef{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:640px){ .glocke{width:44px;height:44px} .dip-gross b{font-size:28px} }

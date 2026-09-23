@@ -303,45 +303,113 @@ function screenGeld(o) {
 /* ---------- Suche / Watchlist / neue Order ---------- */
 function screenSuche(art) {
   return (body, nav) => {
-    const alle = stand.universum || [];
     const titel = {suche: 'Suche', watchlist: 'Watchlist', order: 'Neue Order'}[art];
-    const unter = art === 'order' ? 'Welches Wertpapier möchtest du handeln?' : alle.length + ' handelbare Wertpapiere · ' + stand.handelsplatz;
+    const unter = art === 'order' ? 'Welche Aktie möchtest du handeln?' : 'Jede Aktie mit ISIN, die an ' + stand.handelsplatz + ' gehandelt wird';
     const sf = el('div', 'suchfeld'); sf.innerHTML = ICON.suche;
     const input = el('input'); input.type = 'search'; input.placeholder = 'Name, Kürzel oder ISIN'; input.autocomplete = 'off'; input.spellcheck = false;
-    input.setAttribute('aria-label', 'Wertpapier suchen'); sf.append(input);
+    input.setAttribute('aria-label', 'Aktie suchen'); sf.append(input);
     const liste = el('div', 'liste');
-    let treffer = [], preise = [];
+    let treffer = [], preise = [], nr = 0;
     function oeffnen(s) { nav.zu(); zeigeSeite('wert', s); if (art === 'order' && !istBreit()) setTimeout(handelmenuAuf, 320); }
+    async function hinzu(t, knopfEl) {
+      knopfEl.classList.add('laedt');
+      const a = await post('/watchlist', {aktion: 'hinzu', isin: t.isin, symbol: t.symbol, name: t.name, yahoo: t.yahoo});
+      knopfEl.classList.remove('laedt');
+      if (!a.ok) { toast(a.text, true); return; }
+      toast(a.text); await tick(); oeffnen(a.symbol);
+    }
+    function reiheBauen(t) {
+      const b = knopf('reihe', null, () => t.watchlist ? oeffnen(t.symbol) : hinzu(t, b));
+      const m = el('div', 'r-mitte');
+      m.append(t.watchlist ? mitZeichen(el('div', 'r-titel', t.name), t.symbol) : el('div', 'r-titel', t.name),
+        el('div', 'r-unter', [t.symbol !== t.isin ? t.symbol : '', t.isin, t.branche].filter(Boolean).join(' · ')));
+      const r = el('div', 'r-rechts');
+      if (t.watchlist) {
+        const preis = el('div', 'r-betrag'); preise.push([preis, t.symbol]); r.append(preis);
+        const plan = planVon(t.symbol), z = zeileVon(t.symbol);
+        r.append(el('div', 'r-unter', [z ? 'im Depot' : 'Watchlist', plan && plan.aktiv !== false ? 'Sparplan' : ''].filter(Boolean).join(' · ')));
+      } else { const plus = el('span', 'plus-knopf'); plus.innerHTML = ICON.plus; plus.title = 'Zur Watchlist hinzufügen'; r.append(plus); }
+      b.append(logo(t.symbol), m, r);
+      return b;
+    }
     function malen() {
-      const q = input.value.trim().toLowerCase();
-      treffer = alle.filter(p => !q || [p.name, p.symbol, p.isin || ''].some(x => x.toLowerCase().includes(q)));
       liste.textContent = ''; preise = [];
-      treffer.forEach(p => {
-        const b = knopf('reihe', null, () => oeffnen(p.symbol));
-        const m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', p.name), el('div', 'r-unter', p.symbol + (p.isin ? ' · ' + p.isin : '')));
-        const r = el('div', 'r-rechts'); const preis = el('div', 'r-betrag'); preise.push([preis, p.symbol]); r.append(preis);
-        const plan = planVon(p.symbol), z = zeileVon(p.symbol);
-        if (z || plan) r.append(el('div', 'r-unter', [z ? 'im Depot' : '', plan && plan.aktiv !== false ? 'Sparplan' : ''].filter(Boolean).join(' · ')));
-        b.append(logo(p.symbol), m, r); liste.append(b);
-      });
-      if (!treffer.length) liste.append(el('p', 'leer', 'Kein Wertpapier gefunden. Handelbar sind die Papiere unter „universum“ in depot.json.'));
+      const eigene = treffer.filter(t => t.watchlist), weitere = treffer.filter(t => !t.watchlist);
+      if (eigene.length) { liste.append(el('div', 'such-gruppe', 'Deine Watchlist')); eigene.forEach(t => liste.append(reiheBauen(t))); }
+      if (weitere.length) { liste.append(el('div', 'such-gruppe', 'Weitere Aktien · antippen zum Hinzufügen')); weitere.forEach(t => liste.append(reiheBauen(t))); }
+      if (!treffer.length) liste.append(el('p', 'leer', 'Nichts gefunden. Gib die ISIN ein (steht auf jeder Börsenseite), dann lässt sich jede an ' + stand.handelsplatz + ' gehandelte Aktie hinzufügen.'));
       preiseMalen();
     }
+    async function laden() {
+      const q = input.value.trim(), meins = ++nr;
+      try {
+        const d = await (await fetch('/suche?q=' + encodeURIComponent(q))).json();
+        if (meins !== nr) return;
+        treffer = art === 'watchlist' && !q ? d.filter(t => t.watchlist) : d; malen();
+      } catch (e) {}
+    }
     function preiseMalen() { preise.forEach(([e, s]) => { const k = quote(s).last; e.textContent = k ? geld(k) : '–'; }); }
-    input.addEventListener('input', malen);
+    let uhr; input.addEventListener('input', () => { clearTimeout(uhr); uhr = setTimeout(laden, 180); });
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && treffer[0]) { e.preventDefault(); oeffnen(treffer[0].symbol); }
+      if (e.key === 'Enter') { const f = liste.querySelector('button'); if (f) { e.preventDefault(); f.click(); } }
       if (e.key === 'ArrowDown') { const f = liste.querySelector('button'); if (f) { e.preventDefault(); f.focus(); } }
     });
     liste.addEventListener('keydown', e => {
       const b = e.target.closest('button'); if (!b) return;
-      if (e.key === 'ArrowDown' && b.nextElementSibling) { e.preventDefault(); b.nextElementSibling.focus(); }
-      if (e.key === 'ArrowUp') { e.preventDefault(); (b.previousElementSibling || input).focus(); }
+      const alle = [...liste.querySelectorAll('button')], i = alle.indexOf(b);
+      if (e.key === 'ArrowDown' && alle[i + 1]) { e.preventDefault(); alle[i + 1].focus(); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); (alle[i - 1] || input).focus(); }
     });
     body.append(el('h1', 's-titel', titel), el('div', 's-unter', unter), sf, liste);
-    malen();
+    laden();
     return {fokus: input, update: preiseMalen};
   };
+}
+
+/* ---------- Mitteilungen ---------- */
+const MELD_ICON = {chance: DIP_ICON('chance'), messer: DIP_ICON('messer'), zahlen: I('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', 2.2)};
+function DIP_ICON(k) { return k === 'chance' ? I('<path d="M3 5l6 9 4-4 8 8"/><path d="M13 10l8-6"/><path d="M16 4h5v5"/>', 2.4) : I('<path d="M3 5l6 6 4-4 8 8"/><path d="M21 10v5h-5"/>', 2.6); }
+const ungelesen = () => (stand.meldungen || []).filter(m => !m.gelesen).length;
+function screenMeldungen() {
+  return (body, nav) => {
+    const liste = stand.meldungen || [];
+    body.append(el('h1', 's-titel', 'Mitteilungen'), el('div', 's-unter', 'Buy-the-Dip-Signale und Quartalszahlen deiner Watchlist'));
+    const box = el('div', 'liste'); box.style.marginTop = '14px';
+    liste.forEach(m => {
+      const b = knopf('reihe meldung-reihe ' + m.art + (m.gelesen ? '' : ' neu-m'), null, () => { nav.zu(); zeigeSeite('wert', m.symbol); });
+      const i = el('div', 'logo meld-icon ' + m.art); i.innerHTML = MELD_ICON[m.art] || ICON.plus;
+      const t = el('div', 'r-mitte'); t.append(el('div', 'r-titel', m.titel), el('div', 'r-detail', m.text), el('div', 'r-unter', zeitText(m.zeit)));
+      b.append(i, t); box.append(b);
+    });
+    if (!liste.length) box.append(el('p', 'leer', 'Noch keine Mitteilungen. Sobald eine Aktie deiner Watchlist einen Rücksetzer im intakten Trend macht, erscheint sie hier.'));
+    body.append(box, el('h3', null, 'Einstellungen'));
+    const an = option(ICON.haken, stand.benachrichtigen === false ? 'Mitteilungen einschalten' : 'Mitteilungen ausschalten', async () => {
+      await post('/meldungen', {benachrichtigen: stand.benachrichtigen === false}); await tick(); nav.zu();
+    }, true);
+    body.append(an);
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      body.append(option(ICON.plus, Notification.permission === 'denied' ? 'Desktop-Mitteilungen im Browser blockiert' : 'Desktop-Mitteilungen erlauben', async () => {
+        const r = await Notification.requestPermission(); toast(r === 'granted' ? 'Desktop-Mitteilungen sind an' : 'Nicht erlaubt: Mitteilungen erscheinen nur in der App', r !== 'granted'); nav.zu();
+      }, true));
+    }
+    body.append(el('p', 's-tipp', 'Ein Signal wird gemeldet, wenn es drei Kursabfragen in Folge besteht. Desktop-Mitteilungen funktionieren auf http://localhost; vom Handy über --offen erscheinen sie in der App.'));
+    if (ungelesen()) post('/meldungen', {}).then(tick);
+    return {};
+  };
+}
+let gemeldet = new Set((hol('pd-gemeldet') || '').split(',').filter(Boolean));
+function neueMeldungen() {                                  // Toast und Desktop-Mitteilung für Neues
+  const neu = (stand.meldungen || []).filter(m => !m.gelesen && !gemeldet.has(m.id));
+  neu.slice(0, 3).forEach(m => {
+    toast(m.titel);
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { const n = new Notification(m.titel, {body: m.text, tag: m.id}); n.onclick = () => { window.focus(); zeigeSeite('wert', m.symbol); }; } catch (e) {}
+    }
+  });
+  neu.forEach(m => gemeldet.add(m.id));
+  if (neu.length) setz('pd-gemeldet', [...gemeldet].slice(-200).join(','));
+  const n = ungelesen();
+  ['glockeZahl', 'navMeldZahl'].forEach(id => { const e = $(id); if (e) { e.textContent = n || ''; e.hidden = !n; } });
 }
 
 /* ---------- Kaufen: Schnellbeträge (schmale Ansicht) ---------- */
@@ -763,7 +831,7 @@ function kpi(box, titel, wert, klasse, sub) {
 /* ---------- Portfolio ---------- */
 function positionReihe(z) {
   const b = knopf('reihe', null, () => zeigeSeite('wert', z.symbol));
-  const m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', z.name), el('div', 'r-unter', z.wert != null ? geld(z.wert) : 'kein Kurs'));
+  const m = el('div', 'r-mitte'); m.append(mitZeichen(el('div', 'r-titel', z.name), z.symbol), el('div', 'r-unter', z.wert != null ? geld(z.wert) : 'kein Kurs'));
   const r = el('div', 'r-rechts');
   if (z.gv != null) {
     const p = el('div'); p.dataset.basis = 'r-perf';
@@ -778,7 +846,7 @@ function positionZeileTabelle(z, gesamt) {
   const oeffnen = () => zeigeSeite('wert', z.symbol);
   tr.onclick = oeffnen; tr.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); oeffnen(); } };
   const td = (cls, ...kinder) => { const c = el('td', cls); c.append(...kinder); tr.append(c); return c; };
-  const name = el('div', 't-name'); const n = el('div'); n.append(el('div', 't-titel', z.name), el('div', 't-klein', z.symbol + ' · ' + (z.isin || '')));
+  const name = el('div', 't-name'); const n = el('div'); n.append(mitZeichen(el('div', 't-titel', z.name), z.symbol), el('div', 't-klein', z.symbol + ' · ' + (z.isin || '')));
   name.append(logo(z.symbol), n); td(null, name);
   td('r opt', STK4.format(z.anteile));
   td('r', z.kurs ? geld(z.kurs) : '–');
@@ -810,7 +878,8 @@ function malePortfolio() {
   mb.setAttribute('aria-label', 'Anzeige umschalten: seit Kauf in ' + (modus === 'pct' ? 'Prozent' : 'Euro'));
   const zeilen = (stand.zeilen || []).slice().sort((a, b) => (b.wert || 0) - (a.wert || 0));
   $('pfAnzahl').textContent = zeilen.length + (zeilen.length === 1 ? ' Position' : ' Positionen');
-  ersetzeWennNeu($('pfListe'), modus + JSON.stringify(zeilen.map(z => [z.symbol, z.name, z.wert, z.gv])), box => {
+  const dipSig = JSON.stringify((stand.universum || []).map(u => (dipVon(u.symbol) || {}).status));
+  ersetzeWennNeu($('pfListe'), modus + dipSig + JSON.stringify(zeilen.map(z => [z.symbol, z.name, z.wert, z.gv])), box => {
     zeilen.forEach(z => box.append(positionReihe(z)));
     if (!zeilen.length) box.append(el('p', 'leer', 'Noch keine Investments. Zahle über „Überweisen“ Geld ein und kaufe über „Suche“ dein erstes Wertpapier.'));
   });
@@ -820,7 +889,7 @@ function malePortfolio() {
   const sortiert = zeilen.slice().sort((a, b) => key === 'name' ? a.name.localeCompare(b.name, 'de') : ((wertVon(a) ?? -Infinity) - (wertVon(b) ?? -Infinity)));
   if (sortPf.ab) sortiert.reverse();
   document.querySelectorAll('#pfThead th').forEach(th => { if (th.dataset.k === key) th.setAttribute('aria-sort', sortPf.ab ? 'descending' : 'ascending'); else th.removeAttribute('aria-sort'); });
-  ersetzeWennNeu($('pfTabelle'), JSON.stringify([sortPf, sortiert.map(z => [z.symbol, z.wert, z.gv, z.kurs, z.anteile])]), tb => {
+  ersetzeWennNeu($('pfTabelle'), dipSig + JSON.stringify([sortPf, sortiert.map(z => [z.symbol, z.wert, z.gv, z.kurs, z.anteile])]), tb => {
     sortiert.forEach(z => tb.append(positionZeileTabelle(z, gesamt)));
     if (!sortiert.length) { const tr = el('tr', 'statisch'); const td = el('td', 'leer', 'Noch keine Investments.'); td.colSpan = 6; tr.append(td); tb.append(tr); }
   });
@@ -997,6 +1066,7 @@ function maleAnalyseWert(s) {
   ersetzeWennNeu(box, sig, b => {
     if (!a || !a.ok) { b.append(el('p', 'leer', (a && a.text) || (k && k.text) || 'Analyse wird geladen …')); return; }
     const raster = el('div', 'an-raster'); b.append(raster);
+    raster.append(dipKarte({...a, symbol: s}));
     // Gesamturteil
     const c1 = el('div', 'an-karte');
     const kopf = el('div', 'urteil-kopf'), rechts = el('div');
@@ -1004,12 +1074,14 @@ function maleAnalyseWert(s) {
     rechts.firstChild.style.marginBottom = '8px';
     kopf.append(scoreRing(a.score, a.ton), rechts);
     c1.append(kopf, gruendeListe(a, 2),
-      el('p', 'an-hinweis', 'Score = 60 % Technik (' + a.signale.length + ' Indikatoren aus ' + a.kennzahlen.tage + ' Tageskursen) + 40 % Analysten. Ab 58 „Eher kaufen“, ab 70 „Kaufen“, unter 42 „Eher abwarten“.'));
+      el('p', 'an-hinweis', 'Score = 60 % Technik (' + a.signale.filter(x => !x.info).length + ' Indikatoren aus ' + a.kennzahlen.tage + ' Tageskursen, gewichtet nach Trendstärke) + 40 % Analysten (Empfehlung, Kursziel, Gewinnrevisionen). Ab 58 „Eher kaufen“, ab 70 „Kaufen“, unter 42 „Eher abwarten“.'));
     // Analysten
     const c2 = el('div', 'an-karte'), an = a.analysten;
     if (an && k && k.empfehlung) {
       const n = k.empfehlung.reduce((x, y) => x + y, 0);
-      c2.append(el('h3', null, 'Analysten · ' + n + ' Meinungen'), empfehlungen(k.empfehlung), kursziel(an),
+      const rv = el('div', 'zeile'); rv.style.cssText = 'border:0;padding:0';
+      rv.append(el('div', 'k', 'Gewinnschätzungen, 30 Tage'), el('div', 'w', (an.rev_hoch ?? '–') + ' angehoben · ' + (an.rev_runter ?? '–') + ' gesenkt'));
+      c2.append(el('h3', null, 'Analysten · ' + n + ' Meinungen'), empfehlungen(k.empfehlung), kursziel(an), rv,
         el('p', 'an-hinweis', 'Quelle: ' + an.quelle + ', Stand ' + datum(an.stand) + '. Kursziel in Handelswährung ' + (an.waehrung || 'USD') + ', das Potenzial gilt auch in Euro.'));
     } else c2.append(el('h3', null, 'Analysten'), el('p', 'leer', a.hinweis_analysten || 'Keine Analystendaten verfügbar. Der Score stützt sich nur auf die Technik.'));
     // Indikatoren
@@ -1019,15 +1091,17 @@ function maleAnalyseWert(s) {
     a.signale.forEach(x => {
       const z = el('div', 'signal');
       const t = el('div', 's-text'); t.append(el('b', 's-wert', x.wert), document.createTextNode(' · ' + x.text));
-      z.append(el('div', 's-name', x.name), meter(x.punkte), t);
+      z.append(el('div', 's-name', x.name), x.info ? el('span', 'info-tag', 'Gewichtung') : meter(x.punkte), t);
       liste.append(z);
     });
     c3.append(ik, liste);
     // Chart und Kennzahlen
     const c4 = el('div', 'an-karte'), kz = a.kennzahlen;
+    const c4kopf = [];
     const ck = el('div', 'panel-kopf'); ck.style.margin = '0';
     const leg = el('div', 'legende'); leg.innerHTML = '<span><i style="background:#f2a24e"></i>Kurs</span><span><i style="background:#64a8ff"></i>SMA 50</span><span><i style="background:#b48cff"></i>SMA 200</span>';
     ck.append(el('h3', null, 'Kurs, 1 Jahr'), leg);
+    if (kz.zahlen) c4kopf.push(el('p', 'an-hinweis' + (kz.bis_zahlen != null && kz.bis_zahlen <= 7 ? ' warnung' : ''), 'Nächste Quartalszahlen: ' + datum(kz.zahlen) + (kz.bis_zahlen != null ? ' (in ' + kz.bis_zahlen + ' Tagen)' : '')));
     const chart = el('div', 'an-chart');
     const kzBox = el('div', 'kennzahlen');
     const pk = v => v == null ? '–' : pct1(v), rk = v => v == null ? '' : v >= 0 ? 'up' : 'down';
@@ -1037,7 +1111,10 @@ function maleAnalyseWert(s) {
     kennzahl(kzBox, '52 Wochen Hoch', geld(kz.hoch52));
     kennzahl(kzBox, 'Abstand zum Hoch', pk(kz.vom_hoch), rk(kz.vom_hoch));
     kennzahl(kzBox, 'Volatilität 30 T.', kz.vola == null ? '–' : ZAHL1.format(kz.vola) + ' % p. a.');
-    c4.append(ck, chart, kzBox);
+    kennzahl(kzBox, 'MSCI World 3 Monate', pk(kz.markt_3m), rk(kz.markt_3m));
+    kennzahl(kzBox, 'Gewinnschätzungen', a.revisionen == null ? '–' : a.revisionen > 0.2 ? 'steigen' : a.revisionen < -0.2 ? 'sinken' : 'stabil', a.revisionen == null ? '' : a.revisionen > 0.2 ? 'up' : a.revisionen < -0.2 ? 'down' : '');
+    kennzahl(kzBox, '52 Wochen Tief', geld(kz.tief52));
+    c4.append(ck, chart, kzBox, ...c4kopf);
     raster.append(c1, c2, c3, c4);
     requestAnimationFrame(() => zeichneAnalyseChart(chart, a.chart || []));
   });
@@ -1047,7 +1124,7 @@ function aktienAnalyseListe(box) {
   uni.forEach(u => {
     const a = analyseVon(u.symbol) || {}, q = quote(u.symbol), z = zeileVon(u.symbol);
     const b = knopf('aktie-zeile', null, () => { zeigeSeite('wert', u.symbol); setTimeout(() => $('wpAnalyseBlock').scrollIntoView({behavior: 'smooth', block: 'start'}), 120); });
-    const m = el('div', 'r-mitte'); m.append(el('div', 't-titel', u.name), el('div', 't-klein', (q.last ? geld(q.last) : '–') + (z ? ' · im Depot' : '')));
+    const m = el('div', 'r-mitte'); m.append(mitZeichen(el('div', 't-titel', u.name), u.symbol), el('div', 't-klein', (q.last ? geld(q.last) : '–') + (z ? ' · im Depot' : '')));
     b.append(logo(u.symbol), m);
     if (a.ok) {
       const t = el('div'); t.append(badge(a, true));
@@ -1060,6 +1137,49 @@ function aktienAnalyseListe(box) {
     box.append(b);
   });
 }
+const DIP = {
+  chance: {name: 'Buy the Dip', icon: I('<path d="M3 5l6 9 4-4 8 8"/><path d="M21 12v6h-6" opacity=".35"/><path d="M13 10l8-6"/><path d="M16 4h5v5"/>', 2.4)},
+  beobachten: {name: 'Rücksetzer', icon: I('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', 2.2)},
+  messer: {name: 'Fallendes Messer', icon: I('<path d="M3 5l6 6 4-4 8 8"/><path d="M21 10v5h-5"/>', 2.6)},
+};
+const dipVon = s => { const a = analyseVon(s); return a && a.ok && a.dip && a.dip.status ? a.dip : null; };
+function dipZeichen(s, mitText) {                            // kleines Zeichen neben dem Namen
+  const d = dipVon(s); if (!d) return null;
+  const z = el('span', 'dip-zeichen ' + d.status + (mitText ? ' text' : ''));
+  z.innerHTML = DIP[d.status].icon;
+  if (mitText) z.append(el('span', null, DIP[d.status].name + ' · ' + pct1(d.rueckgang)));
+  z.title = DIP[d.status].name + ': ' + pct1(d.rueckgang) + ' vom 20-Tage-Hoch. ' + (d.text || '');
+  return z;
+}
+function mitZeichen(titelEl, s) { const z = dipZeichen(s); if (z) titelEl.append(z); return titelEl; }
+function dipKarte(a) {
+  const c = el('div', 'an-karte voll dip-karte' + (a.dip && a.dip.status ? ' ' + a.dip.status : ''));
+  const d = a.dip || {};
+  const kopf = el('div', 'panel-kopf'); kopf.style.margin = '0';
+  const h = el('h3', null, 'Buy the Dip'); kopf.append(h);
+  if (!d.status) {
+    kopf.append(el('span', 't-klein', 'kein Rücksetzer'));
+    c.append(kopf, el('p', 'an-hinweis', d.rueckgang == null ? 'Zu wenig Daten.' :
+      'Kurs ' + pct1(d.rueckgang) + ' vom 20-Tage-Hoch. Als Rücksetzer gilt ab ' + ZAHL1.format(d.schwelle) + ' % (je nach Schwankung der Aktie). Du bekommst eine Mitteilung, sobald es so weit ist.'));
+    return c;
+  }
+  kopf.append(dipZeichen(a.symbol || gewaehlt, true));
+  const oben = el('div', 'dip-oben');
+  const gross = el('div', 'dip-gross'); gross.append(el('b', 'down', pct1(d.rueckgang)), el('span', null, 'vom 20-Tage-Hoch ' + geld(d.hoch20)));
+  oben.append(gross, el('p', 'dip-text', d.text));
+  const liste = el('div', 'dip-pruef');
+  d.pruef.forEach(p => {
+    const z = el('div', 'dip-p ' + (p.ok ? 'ok' : 'nein'));
+    const i = el('span', 'dip-i', p.ok ? '✓' : '✕');
+    const t = el('div'); t.append(el('b', null, p.name), el('span', null, p.text));
+    z.append(i, t); liste.append(z);
+  });
+  c.append(kopf, oben, liste);
+  if (d.zone) c.append(el('p', 'an-hinweis', 'Nachkauf-Zone bis zum 200-Tage-Schnitt: ' + geld(d.zone[1]) + ' bis ' + geld(d.zone[0]) + ' (20-Tage-Tief). Wer gestaffelt kauft, teilt den Betrag auf mehrere Käufe auf.'));
+  if (d.warnung) { const w = el('p', 'an-hinweis warnung', d.warnung); c.append(w); }
+  return c;
+}
+
 function pruefAnalyse(symbol, kauf, volumen) {
   const a = analyseVon(symbol);
   if (!a || !a.ok) return null;
@@ -1068,6 +1188,10 @@ function pruefAnalyse(symbol, kauf, volumen) {
   t.querySelector('b').textContent = a.urteil;
   const grund = (a.score >= 50 ? a.pro : a.contra) || [];
   if (grund[0]) t.append(el('div', 't-klein', grund[0]));
+  if (a.dip && a.dip.status) { const z = dipZeichen(symbol, true); const w = el('div'); w.style.marginTop = '6px'; w.append(z); t.append(w); }
+  if (a.bis_zahlen != null && a.bis_zahlen >= 0 && a.bis_zahlen <= 7) {
+    const w = el('div', 't-klein', 'Quartalszahlen in ' + a.bis_zahlen + ' Tagen: erhöhte Schwankung möglich.'); w.style.color = 'var(--akzent-hell)'; t.append(w);
+  }
   if (kauf && volumen > 0) {                                 // Klumpenrisiko nach dem Kauf
     const z = zeileVon(symbol), anteil = ((z && z.wert) || 0) + volumen, gesamt = (stand.aktien || 0) + volumen;
     if (gesamt && anteil / gesamt > 0.4) {
@@ -1091,7 +1215,19 @@ function maleAnalytics() {
     kpi(box, 'Gebühren', geld(stand.gebuehren), '', (stand.orders || []).length + ' Orders');
     kpi(box, 'Cash-Quote', stand.wert ? ZAHL1.format(stand.cash / stand.wert * 100) + ' %' : '–', '', geld(stand.cash) + ' nicht investiert');
   });
-  ersetzeWennNeu($('anAktien'), JSON.stringify((stand.universum || []).map(u => { const a = analyseVon(u.symbol) || {}; return [u.symbol, a.score, a.technik, a.analysten_score, quote(u.symbol).last, !!zeileVon(u.symbol)]; })), aktienAnalyseListe);
+  ersetzeWennNeu($('anAktien'), JSON.stringify((stand.universum || []).map(u => { const a = analyseVon(u.symbol) || {}; return [u.symbol, a.score, a.technik, a.analysten_score, quote(u.symbol).last, !!zeileVon(u.symbol), a.dip && a.dip.status]; })), aktienAnalyseListe);
+  const dips = (stand.universum || []).map(u => [u, dipVon(u.symbol)]).filter(([, d]) => d);
+  ersetzeWennNeu($('anDip'), JSON.stringify(dips.map(([u, d]) => [u.symbol, d.status, Math.round(d.rueckgang * 10), d.erfuellt])), box => {
+    if (!dips.length) { box.append(el('p', 'leer', 'Gerade kein Rücksetzer bei deinen Watchlist-Aktien. Du bekommst eine Mitteilung, sobald einer auftaucht.')); return; }
+    const reihenfolge = {chance: 0, beobachten: 1, messer: 2};
+    dips.sort((a, b) => reihenfolge[a[1].status] - reihenfolge[b[1].status]).forEach(([u, d]) => {
+      const b = knopf('dip-zeile ' + d.status, null, () => { zeigeSeite('wert', u.symbol); setTimeout(() => $('wpAnalyseBlock').scrollIntoView({behavior: 'smooth', block: 'start'}), 120); });
+      const i = el('span', 'dip-gross-icon'); i.innerHTML = DIP[d.status].icon;
+      const m = el('div', 'r-mitte'); m.append(el('div', 't-titel', u.name), el('div', 't-klein', d.text));
+      const r = el('div', 'r-rechts'); r.append(el('div', 't-titel down', pct1(d.rueckgang)), el('div', 't-klein', d.erfuellt + ' von 4 Kriterien'));
+      b.append(i, m, r); box.append(b);
+    });
+  });
   // Depotwert und Einzahlungen
   const pkt = verlaufAn.filter(p => p.g != null).map(p => ({t: p.t, v: p.w, v2: p.w - p.g}));
   const t = Date.parse(stand.zeit);
@@ -1161,6 +1297,7 @@ function maleWert() {
   const s = gewaehlt, papier = papierVon(s), z = zeileVon(s), q = quote(s);
   ersetzeWennNeu($('wpLogo'), s, box => box.append(logo(s, 'gross')));
   $('wpName').textContent = papier.name;
+  ersetzeWennNeu($('wpDip'), JSON.stringify([s, dipVon(s)]), box => { const z = dipZeichen(s, true); if (z) box.append(z); });
   const kurs = q.last || (z && z.kurs) || null;
   flacker($('wpKurs'), kurs, s);
   $('wpKurs').textContent = kurs ? geld(kurs) : '–';
@@ -1177,7 +1314,8 @@ function maleWert() {
   const an = analyseVon(s), sw = $('wpScoreWert');
   sw.textContent = an && an.ok ? an.score + ' · ' + an.urteil : '–'; sw.className = 'k-wert ' + (an && an.ok ? an.ton : '');
   maleAnalyseWert(s);
-  $('wpInfo').textContent = (stand.infos || {})[s] || 'Für dieses Wertpapier ist keine Beschreibung hinterlegt.';
+  $('wpInfo').textContent = (stand.infos || {})[s] || (papier.branche ? 'Branche: ' + papier.branche + '.' : 'Für dieses Wertpapier ist keine Beschreibung hinterlegt.');
+  $('wpEntfernen').hidden = !!z || !!planVon(s);
   const plan = planVon(s);
   ersetzeWennNeu($('wpStats'), JSON.stringify([s, q, z && [z.anteile, z.einstand, z.investiert, z.gv], plan && [plan.betrag, plan.tag, plan.aktiv], stand.gebuehr]), k => {
     reihe(k, 'Geld / Brief', (q.bid ? geld(q.bid) : '–') + ' / ' + (q.ask ? geld(q.ask) : '–'));
@@ -1257,11 +1395,11 @@ function maleRail() {
     $('rCashWert').textContent = geld(stand.cash);
     maleMarktzeit($('rZeit'));
     const uni = stand.universum || [];
-    ersetzeWennNeu($('rWatch'), JSON.stringify(uni.map(u => [u.symbol, quote(u.symbol).last, (sparks[u.symbol] || []).length])), box => {
+    ersetzeWennNeu($('rWatch'), JSON.stringify(uni.map(u => [u.symbol, quote(u.symbol).last, (sparks[u.symbol] || []).length, (dipVon(u.symbol) || {}).status])), box => {
       uni.forEach(u => {
         const b = knopf('wl', null, () => zeigeSeite('wert', u.symbol));
         const sp = sparks[u.symbol] || [], k = quote(u.symbol).last;
-        const m = el('div'); m.style.minWidth = '0'; m.append(el('div', 'wl-name', u.name), el('div', 'wl-sym', u.symbol));
+        const m = el('div'); m.style.minWidth = '0'; m.append(mitZeichen(el('div', 'wl-name', u.name), u.symbol), el('div', 'wl-sym', u.symbol));
         const r = el('div', 'wl-rechts'); r.append(el('div', 'wl-preis', k ? geld(k) : '–'));
         if (sp.length && k) { const pct = (k - sp[0].k) / sp[0].k * 100; const e = el('div'); e.dataset.basis = 'wl-pct'; perfText(e, pct, ZAHL2.format(Math.abs(pct)) + ' %'); r.append(e); }
         b.append(logo(u.symbol), m, sparkline(sp, k), r); box.append(b);
@@ -1475,6 +1613,7 @@ async function tick() {
   }
   if (!bereit()) { $('ledtext').textContent = 'lade Kurse …'; return; }
   male();
+  neueMeldungen();
   if (Date.now() - verlaufZeit > 30000) ladeVerlauf();
   if (istBreit() && Date.now() - sparkZeit > 60000) ladeSparks();
   if (seite === 'wert' && Date.now() - (analyseZeit[gewaehlt] || 0) > 60000) ladeAnalyse(gewaehlt);
@@ -1493,6 +1632,11 @@ $('kWatch').onclick = $('navWatch').onclick = $('rWatchAlle').onclick = mitStand
 $('kSpar').onclick = $('navSpar').onclick = $('rSparAlle').onclick = mitStand(() => Sheet.oeffnen(screenSparplaene()));
 $('kOrder').onclick = mitStand(() => Sheet.oeffnen(screenSuche('order')));
 $('navProfil').onclick = $('avatar').onclick = mitStand(() => Sheet.oeffnen(screenProfil()));
+$('glocke').onclick = $('navMeld').onclick = mitStand(() => Sheet.oeffnen(screenMeldungen()));
+$('wpEntfernen').onclick = mitStand(async () => {
+  const a = await post('/watchlist', {aktion: 'entfernen', symbol: gewaehlt});
+  toast(a.text, !a.ok); if (a.ok) { await tick(); zeigeSeite(letzteTab); }
+});
 $('kAnalytics').onclick = () => zeigeSeite('analytics');
 $('anZurueck').onclick = () => zeigeSeite('cash');
 $('alleTransaktionen').onclick = mitStand(() => { if (!istBreit()) Sheet.oeffnen(screenTransaktionenListe()); });

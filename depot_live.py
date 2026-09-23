@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 
 import analyse
 import demo
+import katalog
 
 HIER = Path(__file__).parent
 WEB = HIER / "web"
@@ -176,10 +177,17 @@ class Analyse:
     quelle: dict = {}               # Symbol → Herkunft der Tageskurse
     geholt: dict = {}               # (Symbol, Art) → Zeitpunkt
     fehler: dict = {}
+    markt: list = []                # Vergleichsmarkt (MSCI World in Euro) für die relative Stärke
 
     @classmethod
     def auffrischen(cls, universum: list):
         heute = datetime.now(BERLIN).date()
+        if time.time() - cls.geholt.get(("markt", "kurse"), 0) > cls.KURSE_ALLE:
+            try:
+                cls.markt = demo.tageskurse(analyse.MARKT, heute) if DEMO[0] else analyse.hole_tageskurse(analyse.MARKT)
+                cls.geholt[("markt", "kurse")] = time.time()
+            except Exception:
+                cls.geholt[("markt", "kurse")] = time.time() - cls.KURSE_ALLE + 900
         for p in universum:
             s = p["symbol"]
             if time.time() - cls.geholt.get((s, "kurse"), 0) > cls.KURSE_ALLE:
@@ -187,7 +195,7 @@ class Analyse:
                     if DEMO[0]:
                         tage, quelle = demo.tageskurse(s, heute), "Demo-Kurse"
                     else:
-                        ticker = p.get("yahoo") or analyse.XETRA.get(s, s)
+                        ticker = p.get("yahoo") or (katalog.zu_isin(p["isin"]) or {}).get("yahoo") or s
                         tage, quelle = analyse.hole_tageskurse(ticker), f"Yahoo Finance ({ticker}, EUR)"
                     cls.tage[s], cls.quelle[s] = tage, quelle
                     cls.fehler.pop((s, "kurse"), None)
@@ -208,7 +216,7 @@ class Analyse:
         tage = cls.tage.get(symbol)
         if tage is None:
             return {"ok": False, "text": "Analyse wird geladen …"}
-        r = analyse.bewerten(tage, live, cls.analysten.get(symbol), datetime.now(BERLIN).date().isoformat())
+        r = analyse.bewerten(tage, live, cls.analysten.get(symbol), datetime.now(BERLIN).date().isoformat(), cls.markt)
         r["quelle_kurse"] = cls.quelle.get(symbol)
         if (symbol, "analysten") in cls.fehler and symbol not in cls.analysten:
             r["hinweis_analysten"] = "Analystendaten gerade nicht erreichbar."
@@ -275,6 +283,8 @@ def bewerten(depot: dict, stand: dict) -> dict:
             "buchungen": list(reversed(depot.get("buchungen", [])))[:500],
             "quotes": quotes, "sparplaene": depot.get("sparplaene", []), "infos": INFOS,
             "sparplan_tage": list(SPARPLAN_TAGE), "sparplan_min": SPARPLAN_MIN,
+            "meldungen": list(reversed(depot.get("meldungen", [])))[:50],
+            "benachrichtigen": depot.get("benachrichtigen", True),
             "analyse": {u["symbol"]: kurz(Analyse.ergebnis(u["symbol"], quotes.get(u["symbol"], {}).get("last")))
                         for u in universum}}
 
@@ -284,8 +294,105 @@ def kurz(r: dict) -> dict:
     if not r.get("ok"):
         return r
     a = r.get("analysten") or {}
+    d = r.get("dip") or {}
     return {k: r[k] for k in ("ok", "score", "urteil", "ton", "technik", "analysten_score", "potenzial", "pro", "contra")} \
-        | {"empfehlung": [a.get(k, 0) for k in ("stark_kaufen", "kaufen", "halten", "verkaufen", "stark_verkaufen")] if a else None}
+        | {"empfehlung": [a.get(k, 0) for k in ("stark_kaufen", "kaufen", "halten", "verkaufen", "stark_verkaufen")] if a else None,
+           "dip": {k: d.get(k) for k in ("status", "text", "rueckgang", "erfuellt", "warnung")},
+           "bis_zahlen": r["kennzahlen"].get("bis_zahlen"), "zahlen": r["kennzahlen"].get("zahlen")}
+
+
+# --- Benachrichtigungen -----------------------------------------------------
+DIP_TITEL = {"chance": "Buy the Dip", "messer": "Fallendes Messer", "beobachten": "Rücksetzer beobachten"}
+_kandidat: dict = {}                # Symbol → (Status, Anzahl Abfragen in Folge)
+
+
+def meldungen_pruefen(depot: dict, zustand: dict) -> list:
+    """Neue Meldungen bei Buy-the-Dip-Signalen und nahen Quartalszahlen.
+    Ein Signal muss drei Abfragen in Folge bestehen, damit es nicht bei jedem Kurszucken hin und her springt."""
+    if not depot.get("benachrichtigen", True):
+        return []
+    stand, neu = depot.setdefault("signal_stand", {}), []
+    namen = {u["symbol"]: u["name"] for u in depot.get("universum", UNIVERSUM)}
+    for s, a in (zustand.get("analyse") or {}).items():
+        if not a.get("ok"):
+            continue
+        status = (a.get("dip") or {}).get("status")
+        alt, n = _kandidat.get(s, (None, 0))
+        _kandidat[s] = (status, n + 1 if alt == status else 1)
+        if _kandidat[s][1] >= 3 and stand.get(s) != status:
+            stand[s] = status
+            if status in ("chance", "messer"):
+                d = a["dip"]
+                neu.append({"art": status, "symbol": s, "titel": f"{DIP_TITEL[status]}: {namen.get(s, s)}",
+                            "text": f"{abs(d['rueckgang']):.1f} % unter dem 20-Tage-Hoch. {d['text'].split(': ', 1)[-1]}".replace(".", ",", 1)
+                            + f" Score {a['score']} ({a['urteil']})."})
+        bis = a.get("bis_zahlen")
+        if bis is not None and 0 <= bis <= 3 and stand.get(s + ":zahlen") != a.get("zahlen"):
+            stand[s + ":zahlen"] = a.get("zahlen")
+            neu.append({"art": "zahlen", "symbol": s, "titel": f"Quartalszahlen: {namen.get(s, s)}",
+                        "text": "Zahlen " + ("heute" if bis == 0 else "morgen" if bis == 1 else f"in {bis} Tagen")
+                                + ". Der Kurs kann danach stark schwanken."})
+    for m in neu:
+        m.update({"id": f"{int(time.time() * 1000)}-{m['symbol']}-{m['art']}", "zeit": jetzt_iso(), "gelesen": False})
+    if neu:
+        depot["meldungen"] = (depot.get("meldungen", []) + neu)[-100:]
+        speichern(depot)
+    return neu
+
+
+# --- Aktien suchen und zur Watchlist hinzufügen -----------------------------
+def suchen(depot: dict, text: str) -> list:
+    """Treffer aus Watchlist, Katalog und (online, bei ISIN) der Yahoo-Suche."""
+    uni = depot.get("universum", UNIVERSUM)
+    in_uni = {u["isin"] for u in uni}
+    t = text.strip().lower()
+    treffer = [{**u, "watchlist": True} for u in uni
+               if not t or t in u["name"].lower() or t in u["symbol"].lower() or t in u["isin"].lower()]
+    treffer += [{**k, "watchlist": False} for k in katalog.finden(text) if k["isin"] not in in_uni]
+    isin = text.strip().upper()
+    if re.match(katalog.ISIN_MUSTER, isin) and not any(x["isin"] == isin for x in treffer):
+        eintrag = {"symbol": isin, "name": f"Aktie {isin}", "isin": isin, "watchlist": False, "branche": ""}
+        if not DEMO[0]:
+            try:
+                funde = analyse.suche(isin)
+                if funde:
+                    xetra = next((f for f in funde if f["symbol"].endswith(".DE")), None)
+                    heimat = next((f for f in funde if "." not in f["symbol"]), funde[0])
+                    eintrag.update(symbol=heimat["symbol"], name=heimat["name"], yahoo=(xetra or heimat)["symbol"])
+            except Exception:
+                pass
+        treffer.append(eintrag)
+    return treffer[:20]
+
+
+def watchlist_setzen(depot: dict, wunsch: dict) -> dict:
+    uni = depot.setdefault("universum", list(UNIVERSUM))
+    if wunsch.get("aktion") == "entfernen":
+        s = wunsch.get("symbol")
+        if any(p["symbol"] == s for p in depot["positionen"]):
+            return {"ok": False, "text": "Aktien im Depot bleiben auf der Watchlist. Erst verkaufen."}
+        if any(p["symbol"] == s for p in depot.get("sparplaene", [])):
+            return {"ok": False, "text": "Für diese Aktie läuft ein Sparplan. Erst den Sparplan löschen."}
+        depot["universum"] = [u for u in uni if u["symbol"] != s]
+        speichern(depot)
+        return {"ok": True, "text": "Von der Watchlist entfernt."}
+    isin = str(wunsch.get("isin", "")).strip().upper()
+    if not re.match(katalog.ISIN_MUSTER, isin):
+        return {"ok": False, "text": "Bitte eine gültige ISIN angeben (z. B. US0378331005)."}
+    vorhanden = next((u for u in uni if u["isin"] == isin), None)
+    if vorhanden:
+        return {"ok": True, "text": f"{vorhanden['name']} ist schon auf der Watchlist.", "symbol": vorhanden["symbol"]}
+    k = katalog.zu_isin(isin) or {}
+    eintrag = {"symbol": str(k.get("symbol") or wunsch.get("symbol") or isin)[:20],
+               "name": str(k.get("name") or wunsch.get("name") or isin)[:60], "isin": isin,
+               "yahoo": str(k.get("yahoo") or wunsch.get("yahoo") or "")[:20] or None,
+               "branche": k.get("branche", "")}
+    if any(u["symbol"] == eintrag["symbol"] for u in uni):
+        eintrag["symbol"] = isin
+    uni.append(eintrag)
+    speichern(depot)
+    threading.Thread(target=Analyse.auffrischen, args=([eintrag],), daemon=True).start()
+    return {"ok": True, "text": f"{eintrag['name']} zur Watchlist hinzugefügt.", "symbol": eintrag["symbol"]}
 
 
 # --- Handeln ----------------------------------------------------------------
@@ -554,7 +661,7 @@ def verlauf_papier(symbol: str, raum="MAX") -> list:
     punkte = [{"t": t, "k": k} for t, k in sorted(je_zeit.items())]
     if raum != "1T":                                          # davor: Tagesschlusskurse
         erster = punkte[0]["t"] if punkte else float("inf")
-        tage = [{"t": _ms(d + "T17:30:00+02:00"), "k": k} for d, k in Analyse.tage.get(symbol, [])]
+        tage = [{"t": _ms(t[0] + "T17:30:00+02:00"), "k": t[1]} for t in Analyse.tage.get(symbol, [])]
         punkte = [p for p in tage if p["t"] < erster] + punkte
     live = ((Server.zustand or {}).get("quotes") or {}).get(symbol) or {}
     if live.get("last"):
@@ -632,6 +739,8 @@ class Server(BaseHTTPRequestHandler):
         elif weg == "/verlauf":
             raum = frage.get("raum", "MAX").upper()
             self._json(verlauf_papier(frage["symbol"], raum) if frage.get("symbol") else verlauf(raum))
+        elif weg == "/suche":
+            self._json(suchen(Server.depot, frage.get("q", "")))        # ohne Sperre: Online-Suche kann dauern
         elif weg == "/analyse":
             s = frage.get("symbol", "")
             live = (Server.letzte.get(s) or {}).get("last")
@@ -668,6 +777,15 @@ class Server(BaseHTTPRequestHandler):
                 antwort = geld_buchen(Server.depot, betrag_aus(wunsch))
             elif self.path == "/sparplan":
                 antwort = sparplan_setzen(Server.depot, wunsch)
+            elif self.path == "/watchlist":
+                antwort = watchlist_setzen(Server.depot, wunsch)
+            elif self.path == "/meldungen":
+                if "benachrichtigen" in wunsch:
+                    Server.depot["benachrichtigen"] = bool(wunsch["benachrichtigen"])
+                for m in Server.depot.get("meldungen", []):
+                    m["gelesen"] = True
+                speichern(Server.depot)
+                antwort = {"ok": True}
             else:
                 antwort = {"ok": False, "text": "Unbekannte Anfrage."}
             if antwort.get("ok"):
@@ -744,6 +862,8 @@ def main():
                 Server.letzte = stand
                 sparplaene_ausfuehren(depot, stand)
                 b = bewerten(depot, stand)
+                if meldungen_pruefen(depot, b):
+                    b = bewerten(depot, stand)
                 Server.zustand = b
             # Protokoll höchstens alle 30 Sekunden und nur zur Handelszeit
             if b["offen"] and time.time() - letzte_protokollzeit > 30:

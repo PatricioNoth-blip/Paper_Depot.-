@@ -12,28 +12,46 @@ from datetime import date, timedelta
 
 # Verlauf in Abschnitten: (Handelstage, Gesamtveränderung in %), dazu Schlusskurs gestern
 PROFILE = {
-    # Langer Aufwärtstrend, zuletzt kurzer Rücksetzer, der gerade dreht
-    "AMZN": {"ende": 222.10, "rauschen": 1.25, "seed": 7,
-             "abschnitte": [(260, -8), (120, 16), (100, 14), (14, -7), (5, 2.5)]},
+    # Langer Aufwärtstrend, dann ein kräftiger Rücksetzer, der sich gerade fängt: Buy the Dip
+    "AMZN": {"ende": 222.10, "rauschen": 1.2, "seed": 8,
+             "abschnitte": [(260, -6), (140, 14), (82, 21), (13, -11), (3, 1.2)]},
     # Steile Rally, inzwischen heiß gelaufen
     "META": {"ende": 648.40, "rauschen": 1.6, "seed": 11,
              "abschnitte": [(260, 10), (160, 6), (60, 14), (19, 9)]},
-    # Seit Monaten schwächer, unter den Durchschnitten
+    # Seit Monaten schwächer, jetzt noch ein Einbruch: fallendes Messer
     "MSFT": {"ende": 441.20, "rauschen": 1.1, "seed": 3,
-             "abschnitte": [(260, 18), (140, 4), (80, -9), (19, -4)]},
+             "abschnitte": [(260, 18), (140, 4), (85, -8), (14, -8)]},
+    # Vergleichsmarkt MSCI World in Euro
+    "EUNL.DE": {"ende": 104.80, "rauschen": 0.8, "seed": 1, "abschnitte": [(260, 9), (240, 11)]},
 }
 
 ANALYSTEN = {
     "AMZN": {"stark_kaufen": 24, "kaufen": 44, "halten": 5, "verkaufen": 1, "stark_verkaufen": 0,
              "mittel": 1.6, "anzahl": 74, "kursziel": 285.0, "kursziel_hoch": 330.0,
-             "kursziel_tief": 215.0, "kurs": 246.5},
+             "kursziel_tief": 215.0, "kurs": 246.5, "rev_hoch": 18, "rev_runter": 3,
+             "eps_jetzt": 7.12, "eps_vor90": 6.81, "zahlen_in": 36},
     "META": {"stark_kaufen": 14, "kaufen": 40, "halten": 10, "verkaufen": 2, "stark_verkaufen": 1,
              "mittel": 1.9, "anzahl": 67, "kursziel": 760.0, "kursziel_hoch": 900.0,
-             "kursziel_tief": 540.0, "kurs": 720.0},
+             "kursziel_tief": 540.0, "kurs": 720.0, "rev_hoch": 9, "rev_runter": 7,
+             "eps_jetzt": 27.4, "eps_vor90": 27.1, "zahlen_in": 34},
     "MSFT": {"stark_kaufen": 12, "kaufen": 38, "halten": 8, "verkaufen": 0, "stark_verkaufen": 0,
              "mittel": 1.8, "anzahl": 58, "kursziel": 560.0, "kursziel_hoch": 650.0,
-             "kursziel_tief": 470.0, "kurs": 490.0},
+             "kursziel_tief": 470.0, "kurs": 490.0, "rev_hoch": 4, "rev_runter": 11,
+             "eps_jetzt": 14.2, "eps_vor90": 14.6, "zahlen_in": 5},
 }
+
+
+def _zahl(text: str) -> int:
+    """Stabile Zahl aus einem Text (Pythons hash() ändert sich bei jedem Start)."""
+    return sum((i + 1) * ord(c) * 7919 for i, c in enumerate(text))
+
+
+def profil(symbol: str) -> dict:
+    if symbol in PROFILE:
+        return PROFILE[symbol]
+    rnd = random.Random(_zahl(symbol))
+    return {"ende": round(rnd.uniform(30, 400), 2), "rauschen": rnd.uniform(1.0, 2.0), "seed": _zahl(symbol),
+            "abschnitte": [(260, rnd.uniform(-15, 30)), (180, rnd.uniform(-10, 25)), (60, rnd.uniform(-12, 12))]}
 
 
 def handelstage(bis: date, anzahl: int) -> list:
@@ -46,8 +64,8 @@ def handelstage(bis: date, anzahl: int) -> list:
 
 
 def tageskurse(symbol: str, heute: date) -> list:
-    """[(Datum ISO, Schluss), ...] bis gestern."""
-    p = PROFILE.get(symbol) or {"ende": 100.0, "rauschen": 1.3, "seed": len(symbol), "abschnitte": [(500, 10)]}
+    """[(Datum ISO, Schluss, Hoch, Tief), ...] bis gestern."""
+    p = profil(symbol)
     rnd = random.Random(p["seed"])
     renditen = []
     for tage, gesamt in p["abschnitte"]:
@@ -61,12 +79,30 @@ def tageskurse(symbol: str, heute: date) -> list:
         log += r
     werte.reverse()
     tage = handelstage(heute - timedelta(days=1), len(werte))
-    return [(d.isoformat(), round(k, 2)) for d, k in zip(tage, werte)]
+    out = []
+    for d, k in zip(tage, werte):
+        spanne = k * p["rauschen"] / 100 * rnd.uniform(0.4, 1.1)   # Tagesspanne um den Schluss
+        out.append((d.isoformat(), round(k, 2), round(k + spanne * rnd.random(), 2), round(k - spanne * rnd.random(), 2)))
+    return out
 
 
 def analysten(symbol: str, heute: date) -> dict | None:
     a = ANALYSTEN.get(symbol)
-    return {**a, "waehrung": "USD", "quelle": "Demo-Werte", "stand": heute.isoformat()} if a else None
+    if a is None:                                                  # erfundene, aber stabile Werte für jede Aktie
+        rnd = random.Random(_zahl(symbol) + 1)
+        n = rnd.randint(12, 45)
+        teile = [rnd.random() * g for g in (1.2, 2.0, 1.4, 0.4, 0.15)]
+        zahlen = [round(n * t / sum(teile)) for t in teile]
+        kurs = profil(symbol)["ende"]
+        ziel = kurs * rnd.uniform(0.95, 1.25)
+        a = {"stark_kaufen": zahlen[0], "kaufen": zahlen[1], "halten": zahlen[2], "verkaufen": zahlen[3],
+             "stark_verkaufen": zahlen[4], "mittel": None, "anzahl": sum(zahlen), "kursziel": round(ziel, 2),
+             "kursziel_hoch": round(ziel * 1.2, 2), "kursziel_tief": round(ziel * 0.75, 2), "kurs": kurs,
+             "rev_hoch": rnd.randint(0, 12), "rev_runter": rnd.randint(0, 12), "zahlen_in": rnd.randint(3, 80),
+             "waehrung": "EUR"}
+    a = dict(a)
+    a["zahlen"] = (heute + timedelta(days=a.pop("zahlen_in"))).isoformat()
+    return {"waehrung": "USD", **a, "quelle": "Demo-Werte", "stand": heute.isoformat()}
 
 
 class Kurse:
@@ -82,7 +118,7 @@ class Kurse:
         out = {}
         for p in universum:
             s = p["symbol"]
-            k = self.letzte.get(s) or PROFILE.get(s, {}).get("ende", 100.0)
+            k = self.letzte.get(s) or profil(s)["ende"]
             k = round(k * (1 + self.rnd.gauss(0, 0.0006)), 2)
             self.letzte[s] = k
             out[s] = {"last": k, "bid": round(k * 0.9996, 2), "ask": round(k * 1.0004, 2)}
@@ -97,7 +133,8 @@ def tagesverlauf(universum: list, positionen: list, cash: float, eingezahlt: flo
     rnd, pfade = random.Random(5), {}
     for p in universum:
         s = p["symbol"]
-        a, z = PROFILE.get(s, {}).get("ende", 100.0), Kurse.START.get(s, 100.0)
+        a = profil(s)["ende"]
+        z = Kurse.START.get(s, a)
         weg, w = [0.0], 0.0
         for _ in range(schritte):
             w += rnd.gauss(0, 0.0012)

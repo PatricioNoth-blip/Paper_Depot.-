@@ -20,6 +20,7 @@
   <div class="nav-gruppe">Depot</div>
   <button type="button" class="nav-item" id="navWatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>Watchlist</span><span class="nav-zahl" id="navWatchZahl"></span></button>
   <button type="button" class="nav-item" id="navSpar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg><span>Sparpläne</span><span class="nav-zahl" id="navSparZahl"></span></button>
+  <button type="button" class="nav-item" id="navMeld"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span>Mitteilungen</span><span class="nav-zahl rot" id="navMeldZahl" hidden></span></button>
   <button type="button" class="nav-item" id="navProfil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8"/></svg><span>Einstellungen</span></button>
   <div class="nav-unten">
     <button type="button" class="lk hell" id="nSuche"><span>Suche</span><kbd>/</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg></button>
@@ -37,6 +38,7 @@
     <button type="button" class="suchknopf" id="suchknopf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg><span>Wertpapier suchen</span><kbd>/</kbd></button>
     <div class="kopf-rechts">
       <span class="status" title="Handelsplatz Tradegate"><span class="led" id="led"></span><span id="ledtext">verbinde …</span></span>
+      <button type="button" class="glocke" id="glocke" aria-label="Mitteilungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="zahl-punkt" id="glockeZahl" hidden></span></button>
       <button type="button" class="avatar" id="avatar" aria-label="Depot, Einstellungen und Tastenkürzel">P</button>
     </div>
   </header>
@@ -123,6 +125,10 @@
       </div>
       <div class="kpis" id="anKpis"></div>
       <div class="panel">
+        <div class="panel-kopf"><h3>Buy-the-Dip-Radar</h3><span class="t-klein">Rücksetzer deiner Watchlist · mit Mitteilung</span></div>
+        <div id="anDip"></div>
+      </div>
+      <div class="panel">
         <div class="panel-kopf"><h3>Aktien-Analyse</h3><span class="t-klein">Indikatoren + Analysten · aktualisiert sich automatisch</span></div>
         <div id="anAktien"></div>
       </div>
@@ -135,7 +141,7 @@
         <div class="panel"><div class="panel-kopf"><h3>Aufteilung</h3><span class="t-klein" id="anAufteilungInfo"></span></div><div class="donut-box" id="anDonut"></div></div>
         <div class="panel"><div class="panel-kopf"><h3>Gewinn/Verlust je Position</h3></div><div id="anBalken"></div></div>
       </div>
-      <p class="fuss">Die Einschätzung fasst sieben technische Indikatoren (60 %) und die Analystenmeinungen (40 %) zu einem Score von 0 bis 100 zusammen. Sie ist regelbasiert und keine Anlageberatung.</p>
+      <p class="fuss">Die Einschätzung fasst acht technische Indikatoren (60 %, nach Trendstärke gewichtet) und die Analystenmeinungen inkl. Gewinnrevisionen (40 %) zu einem Score von 0 bis 100 zusammen. Sie ist regelbasiert und keine Anlageberatung.</p>
     </section>
 
     <!-- ===== Wertpapier ===== -->
@@ -145,7 +151,7 @@
         <div class="wp-titel">
           <div id="wpLogo"></div>
           <div class="hero">
-            <div class="label" id="wpName">–</div>
+            <div class="label wp-name-zeile"><span id="wpName">–</span><span id="wpDip"></span></div>
             <div class="hero-zeile"><div class="gross" id="wpKurs">–</div><div class="delta flat" id="wpDelta"></div></div>
             <div class="hero-klein" id="wpGeldBrief"></div>
           </div>
@@ -164,7 +170,7 @@
       </div>
       <div class="wp-unten">
         <div style="display:grid;gap:36px;min-width:0">
-          <div class="block"><h2>Informationen</h2><p class="info" id="wpInfo"></p></div>
+          <div class="block"><h2>Informationen</h2><p class="info" id="wpInfo"></p><button type="button" class="textknopf" id="wpEntfernen" style="justify-self:start">Von der Watchlist entfernen</button></div>
           <div class="block" id="wpAktBlock"><h2>Aktivität</h2><div class="liste" id="wpAktListe"></div></div>
         </div>
         <div class="block"><h2>Wichtigste Statistiken</h2><div class="karte" id="wpStats"></div></div>
