@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 # Vergleichsmarkt für die relative Stärke: iShares Core MSCI World, Xetra, in Euro
 MARKT = "EUNL.DE"
 
-GEWICHT_TECHNIK, GEWICHT_ANALYSTEN = 0.6, 0.4
+GEWICHT_TECHNIK, GEWICHT_ANALYSTEN, GEWICHT_BEWERTUNG = 0.45, 0.35, 0.20
 URTEILE = [(70, "Kaufen", "up"), (58, "Eher kaufen", "up"), (42, "Neutral", "flat"),
            (30, "Eher abwarten", "down"), (0, "Nicht kaufen", "down")]
 
@@ -77,7 +77,7 @@ def _crumb_holen() -> str:
 
 def hole_analysten(symbol: str) -> dict:
     """Empfehlungen (aktueller Monat) und Kursziele der Analysten."""
-    module = "recommendationTrend,financialData,earningsTrend,calendarEvents"
+    module = "recommendationTrend,financialData,earningsTrend,calendarEvents,summaryDetail,defaultKeyStatistics"
     url = (f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(symbol)}"
            f"?modules={module}&crumb={urllib.parse.quote(_crumb_holen())}")
     try:
@@ -92,7 +92,11 @@ def hole_analysten(symbol: str) -> dict:
     rev, eps = jahr.get("epsRevisions") or {}, jahr.get("epsTrend") or {}
     termine = ((r.get("calendarEvents") or {}).get("earnings") or {}).get("earningsDate") or []
     termin = roh({"x": termine[0]}, "x") if termine else None
-    return {"rev_hoch": roh(rev, "upLast30days"), "rev_runter": roh(rev, "downLast30days"),
+    detail, kennz = r.get("summaryDetail") or {}, r.get("defaultKeyStatistics") or {}
+    fcf, cap = roh(fin, "freeCashflow"), roh(detail, "marketCap")
+    return {"kgv_erwartet": roh(detail, "forwardPE") or roh(kennz, "forwardPE"),
+            "kgv": roh(detail, "trailingPE"), "peg": roh(kennz, "pegRatio") or roh(kennz, "trailingPegRatio"),
+            "fcf_rendite": fcf / cap * 100 if fcf and cap else None,"rev_hoch": roh(rev, "upLast30days"), "rev_runter": roh(rev, "downLast30days"),
             "eps_jetzt": roh(eps, "current"), "eps_vor90": roh(eps, "90daysAgo"),
             "zahlen": datetime.fromtimestamp(termin, timezone.utc).date().isoformat() if termin else None,"stark_kaufen": trend.get("strongBuy", 0), "kaufen": trend.get("buy", 0),
             "halten": trend.get("hold", 0), "verkaufen": trend.get("sell", 0),
@@ -399,6 +403,84 @@ def buy_the_dip(werte: list, analysten: dict | None, tage_bis_zahlen: int | None
             "zone": [round(min(werte[-20:]), 2), round(s200, 2)] if s200 and s200 < kurs else None}
 
 
+def bewertung(a: dict | None) -> dict | None:
+    """Ist die Aktie teuer oder günstig? KGV (erwartet), PEG und Free-Cashflow-Rendite, je −2 … +2."""
+    if not a:
+        return None
+    teile = []
+    kgv, peg, fcf = a.get("kgv_erwartet"), a.get("peg"), a.get("fcf_rendite")
+    if kgv and kgv > 0:
+        p, t = _stufe(-kgv, [(-12, 2), (-18, 1), (-25, 0), (-35, -1), (-math.inf, -2)],
+                      ["Sehr günstig bewertet", "Günstig bewertet", "Fair bewertet", "Eher teuer", "Sehr teuer"])
+        teile.append({"id": "kgv", "name": "KGV (erwartet)", "wert": f"{kgv:.1f}".replace(".", ","), "punkte": p, "text": t})
+    if peg and peg > 0:
+        p, t = _stufe(-peg, [(-1, 2), (-1.5, 1), (-2, 0), (-3, -1), (-math.inf, -2)],
+                      ["Wachstum günstig zu haben", "Wachstum fair bis günstig bezahlt", "Wachstum fair bezahlt",
+                       "Wachstum teuer bezahlt", "Wachstum sehr teuer bezahlt"])
+        teile.append({"id": "peg", "name": "PEG (KGV/Wachstum)", "wert": f"{peg:.2f}".replace(".", ","), "punkte": p, "text": t})
+    if fcf is not None:
+        p, t = _stufe(fcf, [(6, 2), (4, 1), (2, 0), (1, -1), (-math.inf, -2)],
+                      ["Sehr viel freier Cashflow je Euro Börsenwert", "Viel freier Cashflow", "Normaler freier Cashflow",
+                       "Wenig freier Cashflow", "Kaum freier Cashflow"])
+        teile.append({"id": "fcf", "name": "Free-Cashflow-Rendite", "wert": _pct(fcf).lstrip("+"), "punkte": p, "text": t})
+    if not teile:
+        return None
+    return {"score": round(50 + 25 * sum(t["punkte"] for t in teile) / len(teile)), "teile": teile}
+
+
+def _dip_technisch(werte: list) -> str | None:
+    """Buy-the-Dip-Status nur aus Kursen (für den Backtest; Analystenmeinungen von damals sind unbekannt)."""
+    d = buy_the_dip(werte, None, None)
+    if not d.get("status"):
+        return None
+    ok = {p["id"]: p["ok"] for p in d["pruef"]}
+    if not ok["trend"]:
+        return "messer"
+    return "chance" if ok["rsi"] + ok["stabil"] >= 1 else "beobachten"
+
+
+def backtest(tage: list, halten=(20, 60), pause=15) -> dict | None:
+    """Wie hätten Buy-the-Dip-Signale und ein hoher Technik-Score in der Vergangenheit abgeschnitten?
+    Ergebnis nach 20 und 60 Handelstagen, verglichen mit „an irgendeinem Tag kaufen“.
+    Nach einem Signal zählen die nächsten 'pause' Tage nicht als neues Signal."""
+    werte = [t[1] for t in tage]
+    hoch, tief = [t[2] if len(t) > 2 else t[1] for t in tage], [t[3] if len(t) > 3 else t[1] for t in tage]
+    lang = max(halten)
+    if len(werte) < 200 + lang + 20:
+        return None
+    start, ende = 200, len(werte) - 1
+    signale = {"dip": [], "score": [], "messer": []}
+    gesperrt = {k: -1 for k in signale}
+    for i in range(start, ende + 1):
+        bis = werte[:i + 1]
+        status = _dip_technisch(bis)
+        sig = signale_technik(bis, hoch[:i + 1], tief[:i + 1])
+        treffer = {"dip": status == "chance", "messer": status == "messer", "score": sig is not None and sig >= 70}
+        for k, an in treffer.items():
+            if an and i > gesperrt[k]:
+                signale[k].append(i)
+                gesperrt[k] = i + pause
+    def auswerten(tage_idx: list) -> dict:
+        out = {"anzahl": len(tage_idx), "tage": [tage[i][0] for i in tage_idx]}
+        for h in halten:
+            r = [(werte[i + h] / werte[i] - 1) * 100 for i in tage_idx if i + h <= ende]
+            out[f"r{h}"] = sum(r) / len(r) if r else None
+            out[f"plus{h}"] = sum(x > 0 for x in r) if r else None
+            out[f"n{h}"] = len(r)
+        return out
+    return {"dip": auswerten(signale["dip"]), "score": auswerten(signale["score"]),
+            "messer": auswerten(signale["messer"]),
+            "immer": auswerten(list(range(start, ende + 1))),
+            "von": tage[start][0], "bis": tage[ende][0]}
+
+
+def signale_technik(werte: list, hoch: list, tief: list) -> int | None:
+    """Technik-Score 0–100 ohne Vergleichsmarkt (für den Backtest)."""
+    sig = [s for s in signale(werte, hoch, tief) if not s.get("info")]
+    gew = sum(s["gewicht"] for s in sig)
+    return round(50 + 50 * sum(s["punkte"] * s["gewicht"] for s in sig) / (2 * gew)) if gew else None
+
+
 def _fortschreiben(tage: list, live: float | None, heute: str) -> list:
     """Tageskurse (Datum, Schluss[, Hoch, Tief]) um den Live-Kurs von heute ergänzen."""
     tage = [t if len(t) >= 4 else (t[0], t[1], t[1], t[1]) for t in tage]
@@ -425,7 +507,9 @@ def bewerten(tage: list, live: float | None, analysten: dict | None, heute: str 
     gew = sum(s["gewicht"] for s in wertend)
     technik = round(50 + 50 * sum(s["punkte"] * s["gewicht"] for s in wertend) / (2 * gew)) if gew else None
     an_score, potenzial = analysten_score(analysten)
-    teile = [(sc, g) for sc, g in ((technik, GEWICHT_TECHNIK), (an_score, GEWICHT_ANALYSTEN)) if sc is not None]
+    bew = bewertung(analysten)
+    teile = [(sc, g) for sc, g in ((technik, GEWICHT_TECHNIK), (an_score, GEWICHT_ANALYSTEN),
+                                   (bew and bew["score"], GEWICHT_BEWERTUNG)) if sc is not None]
     if not teile:
         return {"ok": False, "text": f"Zu wenig Kursdaten ({len(werte)} Tage) für Indikatoren."}
     score = round(sum(sc * g for sc, g in teile) / sum(g for _, g in teile))
@@ -440,6 +524,7 @@ def bewerten(tage: list, live: float | None, analysten: dict | None, heute: str 
     return {
         "ok": True, "score": score, "urteil": text, "ton": ton,
         "technik": technik, "analysten_score": an_score, "potenzial": potenzial, "revisionen": rev,
+        "bewertung": bew,
         "signale": sig, "analysten": analysten, "dip": buy_the_dip(werte, analysten, bis_zahlen),
         "pro": [s["text"] for s in positiv[:2]], "contra": [s["text"] for s in negativ[:2]],
         "kennzahlen": {

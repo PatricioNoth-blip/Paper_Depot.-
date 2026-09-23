@@ -17,12 +17,49 @@ Voraussetzung ist nur Python 3.9+. Zusätzliche Pakete braucht es nicht.
 
 | Datei | Inhalt |
 |---|---|
-| `depot_live.py` | Server, Kurse, Orders, Sparpläne, Mitteilungen, Watchlist |
-| `analyse.py` | Indikatoren, Analystendaten, Score, Buy the Dip |
+| `depot_live.py` | Server, Kurse, Orders, Sparpläne, Aufträge, Mitteilungen |
+| `analyse.py` | Indikatoren, Analysten, Bewertung, Score, Buy the Dip, Backtest |
+| `auftraege.py` | Limit, Stop-Loss, Take-Profit, Trailing-Stop, Kursalarme |
+| `depots.py` | Mehrere Depots mit eigenen Anfangsbeständen |
+| `bericht.py` | Wochenbericht |
 | `katalog.py` | 40 bekannte Aktien (USA, Deutschland, Europa) für die Suche |
 | `demo.py` | Demo-Kurse und Demo-Analystenwerte |
-| `web/` | Oberfläche (`index.html`, `style.css`, `app.js`) |
-| `screenshots/` | Beispiel im Demo-Modus |
+| `web/` | Oberfläche und App-Dateien (Manifest, Service Worker, Icons) |
+| `tests/` | Automatische Tests: `python -m unittest` |
+| `screenshots/` | Beispiele im Demo-Modus |
+
+## Mehrere Depots
+
+Über den Depotnamen oben links (am Handy: Profil → Depots) kannst du Depots wechseln, neu anlegen,
+umbenennen und löschen. Beim Anlegen legst du selbst fest:
+- das **Startguthaben** (Cash),
+- die **Anfangsbestände**: Aktie, Stückzahl und dein Kaufkurs. Sie werden ohne Gebühr eingebucht,
+  und Gewinn und Verlust rechnen ab diesem Kaufkurs.
+
+Jedes Depot hat eigenes Cash, eigene Positionen, Watchlist, Sparpläne, Aufträge und Mitteilungen.
+Die Dateien liegen in `depots/<name>/`. Ein bestehendes `depot.json` wird beim ersten Start
+automatisch als „Hauptdepot“ dorthin verschoben.
+
+**Geld abziehen:** Auf der Cash-Seite und rechts oben gibt es *Einzahlen* und *Auszahlen*.
+
+## Orderarten und Alarme
+
+| Orderart | Was passiert |
+|---|---|
+| Market | sofort zum aktuellen Brief- bzw. Geldkurs |
+| Limit (Kauf) | kauft, sobald der Briefkurs auf das Limit oder darunter fällt |
+| Take-Profit | verkauft, sobald der Geldkurs das Limit erreicht |
+| Stop-Loss | verkauft, sobald der Geldkurs auf den Stopp oder darunter fällt |
+| Trailing-Stop | Stop-Loss mit festem Abstand in %, der mit steigenden Kursen nach oben wandert |
+
+Alle Aufträge außer Market gelten bis auf Weiteres. Ausgeführt wird dann zum aktuellen Kurs und
+nur, solange das Programm läuft. Offene Aufträge stehen auf der Aktienseite und lassen sich dort löschen.
+
+**Kursalarme:** Mitteilung, wenn der Kurs über oder unter einen Wert geht. Das gilt einmal. Eine
+dritte Variante meldet, wenn sich die Einschätzung ändert, und bleibt aktiv.
+
+**Automatischer Dip-Kauf** (Analytics → Buy-the-Dip-Radar): Bei jedem neuen Buy-the-Dip-Signal
+kauft das Programm für einen festen Betrag, höchstens bis zur gewählten Monatsgrenze.
 
 ## Welche Aktien lassen sich kaufen?
 
@@ -34,7 +71,7 @@ darin hast.
 
 ## Analyse je Aktie: so entsteht die Einschätzung
 
-**Technik (60 %)**: acht Indikatoren aus rund 500 Tageskursen, je −2 bis +2 Punkte:
+**Technik (45 %)**: acht Indikatoren aus rund 500 Tageskursen, je −2 bis +2 Punkte:
 
 | Indikator | Positiv, wenn … |
 |---|---|
@@ -50,11 +87,15 @@ darin hast.
 Der **ADX** (Trendstärke) verteilt die Gewichte: In einem starken Trend (ADX ≥ 25) zählen die
 Trendsignale mehr und RSI/Bollinger weniger. Ohne klaren Trend (ADX < 20) ist es umgekehrt.
 
-**Analysten (40 %)** setzt sich so zusammen:
+**Analysten (35 %)** setzt sich so zusammen:
 - Durchschnittliche Empfehlung (45 %)
 - Kurspotenzial bis zum Kursziel (30 %)
 - **Gewinnrevisionen** (25 %): Wie viele Analysten ihre Gewinnschätzung in den letzten 30 Tagen
   angehoben oder gesenkt haben, und wie sich die Schätzung seit 90 Tagen verändert hat.
+
+**Bewertung (20 %)**: Ist die Aktie teuer oder günstig? Gemessen am Kurs-Gewinn-Verhältnis (KGV)
+auf Basis der erwarteten Gewinne, am PEG (KGV im Verhältnis zum Wachstum) und an der
+Free-Cashflow-Rendite. Fehlt ein Teil, wird er weggelassen und die anderen zählen entsprechend mehr.
 
 **Urteil** nach Score: ab 70 *Kaufen*, ab 58 *Eher kaufen*, ab 42 *Neutral*, ab 30 *Eher abwarten*,
 darunter *Nicht kaufen*. Stehen **Quartalszahlen** in den nächsten 7 Tagen an, erscheint eine Warnung.
@@ -91,19 +132,40 @@ Kurszucken meldet. Dasselbe gilt für Quartalszahlen in den nächsten 3 Tagen. D
 als Glocke mit Zähler, als Einblendung in der App und, falls im Browser erlaubt, als
 Desktop-Mitteilung. Desktop-Mitteilungen gehen nur über `http://localhost`, nicht übers WLAN mit `--offen`.
 
+## Backtest
+
+Auf der Aktienseite prüft der Backtest die letzten rund 1,2 Jahre. Er beantwortet die Frage: Was
+wäre nach 1 und nach 3 Monaten herausgekommen, wenn man bei jedem Buy-the-Dip-Signal, bei jedem
+Technik-Score ab 70 oder bei jedem fallenden Messer gekauft hätte? Zum Vergleich steht ein Kauf an
+irgendeinem Tag. Die Buy-the-Dip-Tage erscheinen als grüne Punkte im Jahres-Chart. Die Signale
+entstehen dabei nur aus Kursen, weil die Analystenmeinungen von damals unbekannt sind. Wenige
+Signale bedeuten ein unsicheres Ergebnis.
+
+## Wochenbericht und App
+
+- **Wochenbericht** (Analytics oder Mitteilung jeden Montag): Er zeigt:
+  - die Veränderung des Depots in der Woche
+  - die Positionen und Orders der Woche
+  - wie jeder Kauf seitdem gelaufen ist
+  - einen Vergleich: Käufe mit Score ab 58 gegen Käufe darunter
+  - die aktuellen Buy-the-Dip-Chancen
+- **Als App aufs Handy:** Im Browser „Zum Startbildschirm hinzufügen“ wählen. Die App bekommt ein
+  eigenes Icon und läuft ohne Browserleiste.
+
 ### Automatik
 
 - Live-Kurse: alle 15 s von Tradegate. Die Indikatoren und das Dip-Signal rechnen den heutigen Kurs laufend mit ein.
 - Tageskurse inkl. MSCI World: alle 6 h von Yahoo Finance (Xetra, Euro). Ohne Verbindung dienen die eigenen
   Aufzeichnungen aus `papiere.csv` als Ersatz, und nach 15 min folgt ein neuer Versuch.
-- Analystendaten, Revisionen und Zahlentermine: alle 12 h von Yahoo Finance. Ohne Verbindung wird nach 30 min neu versucht.
+- Aufträge, Alarme und automatischer Dip-Kauf: bei jeder Kursabfrage (alle 15 s).
+- Analystendaten, Revisionen, Bewertung und Zahlentermine: alle 12 h von Yahoo Finance. Ohne Verbindung wird nach 30 min neu versucht.
 - Sparpläne: werden am Ausführungstag während der Handelszeit ausgeführt, solange das Programm läuft.
 
 ## Beispiel (Demo-Modus)
 
 | | |
 |---|---|
-| ![Portfolio mit Zeichen](screenshots/01-portfolio-zeichen.png) | ![Mitteilungen](screenshots/02-mitteilungen.png) |
-| ![Buy-the-Dip-Radar](screenshots/03-analytics-dip-radar.png) | ![Amazon Buy the Dip](screenshots/05-amazon-buy-the-dip.png) |
-| ![Order prüfen](screenshots/06-order-pruefen.png) | ![Microsoft: fallendes Messer](screenshots/10-microsoft-fallendes-messer.png) |
-| ![Suche: alle Aktien](screenshots/08-suche-alle-aktien.png) | ![SAP hinzugefügt](screenshots/09-sap-hinzugefuegt.png) |
+| ![Limit-Kauf](screenshots/19-limit-kauf.png) | ![Trailing-Stop](screenshots/21-trailing-stop.png) |
+| ![Aufträge und Alarme](screenshots/23-auftraege-alarme.png) | ![Bewertung und Backtest](screenshots/24-bewertung-backtest.png) |
+| ![Neues Depot](screenshots/28-depot-neu.png) | ![Wochenbericht](screenshots/26-wochenbericht.png) |
+| ![Portfolio mit Zeichen](screenshots/01-portfolio-zeichen.png) | ![Buy-the-Dip-Radar](screenshots/03-analytics-dip-radar.png) |

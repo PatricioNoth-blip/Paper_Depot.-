@@ -367,16 +367,21 @@ function screenSuche(art) {
 }
 
 /* ---------- Mitteilungen ---------- */
-const MELD_ICON = {chance: DIP_ICON('chance'), messer: DIP_ICON('messer'), zahlen: I('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', 2.2)};
+const MELD_ICON = {chance: DIP_ICON('chance'), messer: DIP_ICON('messer'), zahlen: I('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', 2.2),
+  auftrag: I('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 2.6), auto: DIP_ICON('chance'), alarm: I('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>', 2.2),
+  bericht: I('<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/>', 2.2)};
 function DIP_ICON(k) { return k === 'chance' ? I('<path d="M3 5l6 9 4-4 8 8"/><path d="M13 10l8-6"/><path d="M16 4h5v5"/>', 2.4) : I('<path d="M3 5l6 6 4-4 8 8"/><path d="M21 10v5h-5"/>', 2.6); }
 const ungelesen = () => (stand.meldungen || []).filter(m => !m.gelesen).length;
 function screenMeldungen() {
   return (body, nav) => {
     const liste = stand.meldungen || [];
-    body.append(el('h1', 's-titel', 'Mitteilungen'), el('div', 's-unter', 'Buy-the-Dip-Signale und Quartalszahlen deiner Watchlist'));
+    body.append(el('h1', 's-titel', 'Mitteilungen'), el('div', 's-unter', 'Signale, ausgeführte Aufträge, Alarme und Wochenbericht'));
     const box = el('div', 'liste'); box.style.marginTop = '14px';
     liste.forEach(m => {
-      const b = knopf('reihe meldung-reihe ' + m.art + (m.gelesen ? '' : ' neu-m'), null, () => { nav.zu(); zeigeSeite('wert', m.symbol); });
+      const b = knopf('reihe meldung-reihe ' + m.art + (m.gelesen ? '' : ' neu-m'), null, () => {
+        if (m.art === 'bericht' || !m.symbol) { nav.weiter(screenBericht()); return; }
+        nav.zu(); zeigeSeite('wert', m.symbol);
+      });
       const i = el('div', 'logo meld-icon ' + m.art); i.innerHTML = MELD_ICON[m.art] || ICON.plus;
       const t = el('div', 'r-mitte'); t.append(el('div', 'r-titel', m.titel), el('div', 'r-detail', m.text), el('div', 'r-unter', zeitText(m.zeit)));
       b.append(i, t); box.append(b);
@@ -403,7 +408,7 @@ function neueMeldungen() {                                  // Toast und Desktop
   neu.slice(0, 3).forEach(m => {
     toast(m.titel);
     if ('Notification' in window && Notification.permission === 'granted') {
-      try { const n = new Notification(m.titel, {body: m.text, tag: m.id}); n.onclick = () => { window.focus(); zeigeSeite('wert', m.symbol); }; } catch (e) {}
+      try { const n = new Notification(m.titel, {body: m.text, tag: m.id, icon: '/icon-192.png'}); n.onclick = () => { window.focus(); if (m.symbol) zeigeSeite('wert', m.symbol); else Sheet.oeffnen(screenBericht()); }; } catch (e) {}
     }
   });
   neu.forEach(m => gemeldet.add(m.id));
@@ -439,19 +444,74 @@ function screenInvestiere(symbol) {
 }
 
 /* ---------- Kaufen / Verkaufen: Betrag (Dialog oder Order-Maske) ---------- */
+/* Orderarten: Market sofort, alle anderen als offener Auftrag (siehe auftraege.py) */
+const ORDERARTEN = {
+  kaufen: [['market', 'Market'], ['limit_kauf', 'Limit']],
+  verkaufen: [['market', 'Market'], ['limit_verkauf', 'Take-Profit'], ['stop', 'Stop-Loss'], ['trailing', 'Trailing']],
+};
+const ART_NAME = {market: 'Market', limit_kauf: 'Limit-Kauf', limit_verkauf: 'Take-Profit', stop: 'Stop-Loss', trailing: 'Trailing-Stop'};
+const ART_VORSCHLAG = {limit_kauf: [-2, -5, -10], limit_verkauf: [5, 10, 20], stop: [-5, -10, -15], trailing: [5, 10, 15]};
+function zahlAus(t) {                                       // "230,50", "230.5" oder "1.230,50"
+  t = String(t || '').trim().replace(/\s|€|%/g, '');
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');   // 1.000 = tausend
+  const v = parseFloat(t); return isFinite(v) ? v : null;
+}
+function artText(ord, k) {                                  // Was passiert bei dieser Orderart?
+  const l = ord.limit, f = v => v ? geld(v) : '…';
+  return {
+    market: 'Wird sofort zum aktuellen ' + (ord.richtung === 'kaufen' ? 'Briefkurs' : 'Geldkurs') + ' ausgeführt, dazu ' + geld(stand.gebuehr) + ' Gebühr.',
+    limit_kauf: 'Kauft, sobald der Briefkurs auf ' + f(l) + ' oder darunter fällt. Gilt bis auf Weiteres.',
+    limit_verkauf: 'Verkauft, sobald der Geldkurs ' + f(l) + ' oder mehr erreicht (Gewinn sichern).',
+    stop: 'Verkauft, sobald der Geldkurs auf ' + f(l) + ' oder darunter fällt (Verlust begrenzen).',
+    trailing: 'Der Stopp liegt ' + (l ? ZAHL1.format(l) : '…') + ' % unter dem höchsten Kurs seit heute und zieht mit steigenden Kursen nach' + (l && k ? ' (jetzt ' + geld(k * (1 - l / 100)) + ')' : '') + '.',
+  }[ord.art];
+}
+
 function screenOrder(ord) {
   return (body, nav) => {
     const kauf = ord.richtung === 'kaufen';
+    ord.art = ord.art || 'market';
     const unter = el('div', 's-unter');
     const feld = Betragsfeld({cent: ord.cent, label: (kauf ? 'Kaufbetrag' : 'Verkaufsbetrag') + ' in Euro',
       onChange: c => { ord.cent = c; ord.alles = false; pruefe(); }, onEnter: () => weiter()});
     const anteile = el('div', 'bf-unter');
     const meldung = el('div', 'meldung'); meldung.setAttribute('aria-live', 'polite');
-    const info = el('p', 'markt-info', 'Market-Order: wird sofort zum aktuellen ' + (kauf ? 'Briefkurs' : 'Geldkurs') + ' auf ' + (stand.handelsplatz || 'Tradegate') +
-      ' ausgeführt, dazu ' + geld(stand.gebuehr) + ' Ordergebühr. Limit- und Stop-Orders gibt es in diesem Paperdepot nicht.');
-    info.hidden = true;
-    const markt = knopfTI('markt', 'Market', ICON.runter, () => { info.hidden = !info.hidden; markt.setAttribute('aria-expanded', String(!info.hidden)); feld.fokus(); });
-    markt.setAttribute('aria-expanded', 'false');
+    const info = el('p', 'art-info');
+    // Orderart und Limit/Stopp
+    const arten = el('div', 'arten'); arten.setAttribute('role', 'group'); arten.setAttribute('aria-label', 'Orderart');
+    const preis = el('div', 'preisfeld'), preisLabel = el('label'), preisInput = el('input'), einheit = el('span', 'einheit');
+    preisInput.inputMode = 'decimal'; preisInput.autocomplete = 'off'; preisInput.id = 'preis' + (++bfNr); preisLabel.htmlFor = preisInput.id;
+    const pz = el('div', 'preis-zeile'); pz.append(preisInput, einheit);
+    const vorschlaege = el('div', 'chips links');
+    preis.append(preisLabel, pz, vorschlaege);
+    preisInput.addEventListener('input', () => { ord.limit = zahlAus(preisInput.value); pruefe(); });
+    preisInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); weiter(); } });
+    function artMalen() {
+      arten.textContent = '';
+      ORDERARTEN[ord.richtung].forEach(([a, t]) => {
+        const b = knopf('art-chip', t, () => {
+          if (ord.art === a) return;
+          ord.art = a; ord.limit = null; preisInput.value = ''; artMalen(); pruefe();
+          if (a !== 'market') setTimeout(() => preisInput.focus(), 30); else feld.fokus();
+        });
+        b.setAttribute('aria-pressed', ord.art === a ? 'true' : 'false'); arten.append(b);
+      });
+      preis.hidden = ord.art === 'market';
+      preisLabel.textContent = {limit_kauf: 'Limit (Kauf höchstens zu)', limit_verkauf: 'Verkaufen ab', stop: 'Stopp bei', trailing: 'Abstand zum Höchstkurs'}[ord.art] || '';
+      einheit.textContent = ord.art === 'trailing' ? '%' : '€';
+      preisInput.placeholder = ord.art === 'trailing' ? 'z. B. 8' : 'z. B. 215,00';
+      vorschlaege.textContent = '';
+      (ART_VORSCHLAG[ord.art] || []).forEach(v => {
+        const c = knopf('chip', (v > 0 && ord.art !== 'trailing' ? '+' : '') + v + ' %', () => {
+          const k = kauf ? kaufKurs(ord.symbol) : verkaufKurs(ord.symbol); if (!k) return;
+          ord.limit = ord.art === 'trailing' ? v : Math.round(k * (1 + v / 100) * 100) / 100;
+          preisInput.value = ord.art === 'trailing' ? String(v) : ZAHL2.format(ord.limit); pruefe();
+        });
+        vorschlaege.append(c);
+      });
+    }
+    artMalen();
     const weiterK = knopfTI('knopf orange', 'Weiter', ICON.chev, () => weiter());
     const chips = el('div', 'chips'), chipKnoepfe = [];
     if (!kauf) {
@@ -477,11 +537,11 @@ function screenOrder(ord) {
         const b = knopf('seg', t, () => { if (r !== ord.richtung) ticketNeu(r, true); else feld.fokus(); });
         b.setAttribute('aria-pressed', r === ord.richtung ? 'true' : 'false'); seg.append(b);
       });
-      body.append(seg, unter, feld.el, anteile, chips, meldung, info, fuss(markt, weiterK));
+      body.append(seg, arten, unter, feld.el, anteile, chips, preis, info, meldung, fuss(el('span'), weiterK));
     } else {
-      body.append(kopfPapier(ord.symbol), el('h1', 's-titel', kauf ? 'Kaufen' : 'Verkaufen'), unter, feld.el, anteile);
+      body.append(kopfPapier(ord.symbol), el('h1', 's-titel', kauf ? 'Kaufen' : 'Verkaufen'), arten, unter, feld.el, anteile);
       if (!kauf) body.append(chips);
-      body.append(meldung, info, fuss(markt, weiterK));
+      body.append(preis, info, meldung, fuss(el('span'), weiterK));
     }
 
     function pruefe() {
@@ -501,9 +561,12 @@ function screenOrder(ord) {
         if (c.dataset.c) c.disabled = +c.dataset.c / 100 + stand.gebuehr > stand.cash + 1e-9;
         if (c.dataset.max) c.disabled = stand.cash <= stand.gebuehr;
       });
+      info.textContent = artText(ord, k);
       let fehler = '', betragFehler = false;
-      if (!stand.offen) fehler = 'Handel geschlossen. Orders gehen Mo–Fr ' + stand.handel_von + '–' + stand.handel_bis + ' Uhr.';
+      const auftrag = ord.art !== 'market';
+      if (!stand.offen && !auftrag) fehler = 'Handel geschlossen. Market-Orders gehen Mo–Fr ' + stand.handel_von + '–' + stand.handel_bis + ' Uhr. Aufträge (Limit, Stop) kannst du jederzeit anlegen.';
       else if (!k) fehler = 'Für dieses Papier liegt gerade kein Kurs vor.';
+      else if (auftrag && ord.limit != null && (ord.art === 'trailing' ? ord.limit < 0.5 || ord.limit > 50 : ord.limit <= 0)) fehler = ord.art === 'trailing' ? 'Abstand zwischen 0,5 und 50 %.' : 'Bitte einen Kurs größer als 0 € angeben.';
       else if (kauf && ord.cent > 0 && betrag + stand.gebuehr > stand.cash + 1e-9) {
         fehler = 'Nicht genug Cash: ' + geld(stand.cash) + ' verfügbar, ' + geld(betrag + stand.gebuehr) + ' nötig (inkl. ' + geld(stand.gebuehr) + ' Gebühr).'; betragFehler = true;
       } else if (!kauf && !pos) fehler = 'Du hältst keine Anteile von ' + papierVon(ord.symbol).name + '.';
@@ -511,8 +574,8 @@ function screenOrder(ord) {
       else if (!kauf && ord.cent > 0 && betrag <= stand.gebuehr) { fehler = 'Der Verkaufswert muss über der Gebühr von ' + geld(stand.gebuehr) + ' liegen.'; betragFehler = true; }
       meldung.textContent = fehler; meldung.className = 'meldung' + (fehler ? ' fehler' : '');
       feld.fehler(betragFehler);
-      weiterK.disabled = !!fehler || ord.cent <= 0;
-      return fehler || (ord.cent <= 0 ? 'Bitte gib einen Betrag ein.' : '');
+      weiterK.disabled = !!fehler || ord.cent <= 0 || (auftrag && !ord.limit);
+      return fehler || (ord.cent <= 0 ? 'Bitte gib einen Betrag ein.' : auftrag && !ord.limit ? (ord.art === 'trailing' ? 'Bitte einen Abstand in % angeben.' : 'Bitte einen Kurs angeben.') : '');
     }
     function weiter() {
       const f = pruefe();
@@ -534,14 +597,16 @@ function screenPruefen(ord) {
       .forEach(([id, k]) => { w[id] = reihe(karte, k, '').lastChild; });
     const gross = el('div', 'pruef-betrag');
     const meldung = el('div', 'meldung'); meldung.setAttribute('aria-live', 'polite');
-    const ok = knopfTI('knopf orange breit', (kauf ? 'Kaufen' : 'Verkaufen') + ' bestätigen', ICON.haken, () => los());
+    const auftrag = ord.art && ord.art !== 'market';
+    const ok = knopfTI('knopf orange breit', auftrag ? ART_NAME[ord.art] + ' anlegen' : (kauf ? 'Kaufen' : 'Verkaufen') + ' bestätigen', ICON.haken, () => los());
     const volumen = ord.alles ? 0 : ord.cent / 100;
     const einschaetzung = pruefAnalyse(ord.symbol, kauf, volumen);
-    body.append(kopfPapier(ord.symbol), el('h1', 's-titel', 'Order prüfen'),
-      el('div', 's-unter', (kauf ? 'Kauf' : 'Verkauf') + ' · Market · ' + stand.handelsplatz), gross);
+    body.append(kopfPapier(ord.symbol), el('h1', 's-titel', auftrag ? 'Auftrag prüfen' : 'Order prüfen'),
+      el('div', 's-unter', (kauf ? 'Kauf' : 'Verkauf') + ' · ' + ART_NAME[ord.art || 'market'] + ' · ' + stand.handelsplatz), gross);
     if (einschaetzung) body.append(einschaetzung);
     body.append(karte,
-      el('p', 's-tipp', 'Ausführung sofort zum aktuellen Kurs; bis zur Bestätigung kann er sich minimal bewegen. Paperdepot: Es wird nichts wirklich gehandelt.'),
+      el('p', 's-tipp', auftrag ? artText(ord, kauf ? kaufKurs(ord.symbol) : verkaufKurs(ord.symbol)) + ' Ausgeführt wird dann zum aktuellen Kurs; das Programm muss dafür laufen.'
+        : 'Ausführung sofort zum aktuellen Kurs; bis zur Bestätigung kann er sich minimal bewegen.'),
       meldung, fuss(ok));
     const seit = performance.now();
     function update() {
@@ -550,7 +615,7 @@ function screenPruefen(ord) {
       const stk = ord.alles && pos ? pos.anteile : k ? ord.cent / 100 / k : 0;
       const vol = ord.alles && pos && k ? pos.anteile * k : ord.cent / 100;
       const geb = stand.gebuehr;
-      w.art.textContent = 'Market';
+      w.art.textContent = ART_NAME[ord.art || 'market'] + (auftrag ? ' · ' + (ord.art === 'trailing' ? ZAHL1.format(ord.limit) + ' %' : geld(ord.limit)) : '');
       w.kurs.textContent = k ? geld(k) : '–';
       w.stk.textContent = STK6.format(stk);
       w.vol.textContent = geld(vol);
@@ -558,13 +623,22 @@ function screenPruefen(ord) {
       w.ges.textContent = kauf ? '−' + geld(vol + geb) : '+' + geld(vol - geb);
       w.danach.textContent = geld(stand.cash + (kauf ? -(vol + geb) : vol - geb));
       gross.textContent = geld(vol);
-      const sperre = !stand.offen ? 'Handel geschlossen.' : !k ? 'Gerade kein Kurs verfügbar.' : '';
+      if (auftrag) { w.geb.textContent = geld(geb) + ' bei Ausführung'; w.danach.textContent = 'bei Ausführung'; }
+      const sperre = !stand.offen && !auftrag ? 'Handel geschlossen.' : !k ? 'Gerade kein Kurs verfügbar.' : '';
       ok.disabled = !!sperre;
       if (sperre) { meldung.textContent = sperre; meldung.className = 'meldung fehler'; }
     }
     async function los() {
       if (performance.now() - seit < 400 || ok.disabled || ok.classList.contains('laedt')) return;
       ok.classList.add('laedt'); meldung.textContent = '';
+      if (auftrag) {
+        const r = await post('/auftrag', {art: ord.art, symbol: ord.symbol, cent: ord.cent, alles: !!ord.alles,
+          limit: ord.art === 'trailing' ? null : ord.limit, abstand: ord.art === 'trailing' ? ord.limit : null});
+        ok.classList.remove('laedt');
+        if (!r.ok) { meldung.textContent = r.text; meldung.className = 'meldung fehler'; return; }
+        await tick(); nav.oeffnen(screenAuftragFertig(ord, r)); toast(r.text);
+        return;
+      }
       const a = await post('/order', {richtung: ord.richtung, symbol: ord.symbol, cent: ord.cent, alles: !!ord.alles});
       ok.classList.remove('laedt');
       if (!a.ok) { meldung.textContent = a.text || 'Die Order wurde nicht ausgeführt.'; meldung.className = 'meldung fehler'; return; }
@@ -575,6 +649,18 @@ function screenPruefen(ord) {
     }
     update();
     return {update, fokus: ok, enter: los};
+  };
+}
+function screenAuftragFertig(ord, r) {
+  return (body, nav) => {
+    const box = el('div', 'fertig'), haken = el('div', 'haken');
+    haken.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+    box.append(haken, el('h1', 's-titel', ART_NAME[ord.art] + ' angelegt'), el('div', 's-unter', papierVon(ord.symbol).name));
+    const k = ord.richtung === 'kaufen' ? kaufKurs(ord.symbol) : verkaufKurs(ord.symbol);
+    const fertig = ord.ticket ? knopfTI('knopf dunkel breit mitte', 'Neue Order', null, () => ticketNeu(ord.richtung, true))
+      : knopfTI('knopf hell breit mitte', 'Fertig', null, () => nav.zu());
+    body.append(box, el('p', 's-tipp', artText(ord, k) + ' Du bekommst eine Mitteilung, wenn der Auftrag ausgeführt wird. Offene Aufträge stehen auf der Aktienseite.'), fuss(fertig));
+    return {fokus: fertig, enter: () => fertig.click()};
   };
 }
 function screenFertig(ord, a) {
@@ -724,7 +810,9 @@ function screenProfil() {
     const optionen = el('div'); optionen.style.marginTop = '14px';
     const exp = el('a', 'option klein'); exp.href = '/export.csv'; exp.setAttribute('download', 'paperdepot-umsaetze.csv');
     const ei = el('span', 'o-icon'); ei.innerHTML = ICON.runterladen; exp.append(ei, el('span', null, 'Umsätze als CSV exportieren'));
-    optionen.append(option(ICON.wiederholen, 'Sparpläne', () => nav.weiter(screenSparplaene()), true),
+    optionen.append(option(ICON.liste, 'Depots wechseln oder anlegen', () => nav.weiter(screenDepots()), true),
+      option(ICON.liste, 'Wochenbericht', () => nav.weiter(screenBericht()), true),
+      option(ICON.wiederholen, 'Sparpläne', () => nav.weiter(screenSparplaene()), true),
       option(ICON.liste, 'Alle Transaktionen', () => nav.weiter(screenTransaktionenListe()), true), exp);
     body.append(kopf, karte, optionen,
       el('p', 's-tipp', 'Kurse: Tradegate (live) · Tageskurse und Analystenmeinungen: Yahoo Finance, automatisch alle 6 bzw. 12 Stunden. Tastatur: / Suche, K Kaufen, V Verkaufen, S Sparplan, Esc zurück. Keine echten Orders, keine Anlageberatung.'));
@@ -733,6 +821,8 @@ function screenProfil() {
 }
 
 /* ================= Umsätze ================= */
+const QUELLE_NAME = {start: 'Einbuchung', sparplan: 'Sparplan', 'auto-dip': 'Auto-Dip-Kauf', limit_kauf: 'Limit-Kauf',
+  limit_verkauf: 'Take-Profit', stop: 'Stop-Loss', trailing: 'Trailing-Stop'};
 function umsaetze() {
   const liste = [];
   (stand.orders || []).forEach(o => {
@@ -740,7 +830,7 @@ function umsaetze() {
     const fluss = o.fluss != null ? o.fluss : kauf ? -(o.betrag + o.gebuehr) : o.betrag - o.gebuehr;
     const typ = o.quelle === 'sparplan' ? 'sparplan' : kauf ? 'kauf' : 'verkauf';
     liste.push({zeit: o.zeit, symbol: o.symbol, fluss, typ,
-      titel: (typ === 'sparplan' ? 'Sparplan ' : kauf ? 'Kauf ' : 'Verkauf ') + o.symbol,
+      titel: (QUELLE_NAME[o.quelle] || (kauf ? 'Kauf' : 'Verkauf')) + ' ' + o.symbol,
       unter: zeitText(o.zeit),
       detail: STK4.format(o.stueck) + ' × ' + geld(o.kurs) + ' · Gebühr ' + geld(o.gebuehr)
         + (o.analyse ? ' · Score beim Kauf ' + o.analyse.score + ' (' + o.analyse.urteil + ')' : '')});
@@ -955,6 +1045,7 @@ function teilScores(a) {
   const t = el('div', 'teil-scores');
   const teil = (name, v) => { const s = el('span', null, name + ' '); s.append(el('b', null, v == null ? '–' : String(v))); t.append(s); };
   teil('Technik', a.technik); teil('Analysten', a.analysten_score);
+  if (a.bewertung != null) teil('Bewertung', typeof a.bewertung === 'object' ? a.bewertung.score : a.bewertung);
   if (a.potenzial != null) { const s = el('span', null, 'Kursziel '); s.append(el('b', a.potenzial >= 0 ? 'up' : 'down', pct1(a.potenzial))); t.append(s); }
   return t;
 }
@@ -1002,7 +1093,40 @@ function kursziel(an) {
   return box;
 }
 function kennzahl(box, name, wert, klasse) { const k = el('div', 'kz'); k.append(el('span', null, name), el('b', klasse || '', wert)); box.append(k); }
-function zeichneAnalyseChart(box, reihe) {
+function bewertungKarte(a) {
+  const c = el('div', 'an-karte'), b = a.bewertung;
+  const kopf = el('div', 'panel-kopf'); kopf.style.margin = '0';
+  kopf.append(el('h3', null, 'Bewertung'), b ? el('span', 'badge klein ' + (b.score >= 58 ? 'up' : b.score < 42 ? 'down' : 'flat'), b.score >= 58 ? 'günstig' : b.score < 42 ? 'teuer' : 'fair') : el('span'));
+  c.append(kopf);
+  if (!b) { c.append(el('p', 'leer', 'Keine Bewertungsdaten verfügbar. Der Score stützt sich auf Technik und Analysten.')); return c; }
+  const liste = el('div');
+  b.teile.forEach(x => {
+    const z = el('div', 'signal'); const t = el('div', 's-text'); t.append(el('b', 's-wert', x.wert), document.createTextNode(' · ' + x.text));
+    z.append(el('div', 's-name', x.name), meter(x.punkte), t); liste.append(z);
+  });
+  c.append(liste, el('p', 'an-hinweis', 'Bewertungs-Score ' + b.score + ' von 100. Eine teure Aktie kann trotzdem steigen; die Bewertung bremst nur den Gesamt-Score.'));
+  return c;
+}
+function backtestKarte(a) {
+  const c = el('div', 'an-karte'), bt = a.backtest;
+  const kopf = el('div', 'panel-kopf'); kopf.style.margin = '0';
+  kopf.append(el('h3', null, 'Backtest'), el('span', 't-klein', bt ? datum(bt.von) + ' bis ' + datum(bt.bis) : ''));
+  c.append(kopf);
+  if (!bt) { c.append(el('p', 'leer', 'Für einen Backtest braucht es rund 300 Tageskurse.')); return c; }
+  const tab = el('div', 'bt-tabelle');
+  tab.append(el('span', 'bt-k', ''), el('span', 'bt-k', 'Signale'), el('span', 'bt-k', 'Ø nach 1 Monat'), el('span', 'bt-k', 'Ø nach 3 Monaten'));
+  const zelle = v => el('b', v == null ? '' : v >= 0 ? 'up' : 'down', v == null ? '–' : pct1(v));
+  [['Buy the Dip', bt.dip, 'chance'], ['Technik-Score ≥ 70', bt.score, ''], ['Fallendes Messer', bt.messer, 'messer'], ['Jeden Tag kaufen', bt.immer, 'basis']].forEach(([name, x, cls]) => {
+    const n = el('span', 'bt-name ' + cls, name);
+    tab.append(n, el('span', null, cls === 'basis' ? '–' : String(x.anzahl)), zelle(x.r20), zelle(x.r60));
+  });
+  const d = bt.dip, fazit = d.r60 == null || !d.n60 ? 'Zu wenige abgeschlossene Signale für ein Fazit.'
+    : d.r60 > bt.immer.r60 ? 'Buy-the-Dip-Käufe lagen nach 3 Monaten im Schnitt ' + ZAHL1.format(d.r60 - bt.immer.r60) + ' Prozentpunkte vor einem Kauf an einem beliebigen Tag (' + d.plus60 + ' von ' + d.n60 + ' im Plus).'
+    : 'Buy-the-Dip-Käufe lagen nach 3 Monaten im Schnitt ' + ZAHL1.format(bt.immer.r60 - d.r60) + ' Prozentpunkte hinter einem Kauf an einem beliebigen Tag. Bei dieser Aktie hat die Regel nicht geholfen.';
+  c.append(tab, el('p', 'dip-text', fazit), el('p', 'an-hinweis', 'Signale aus Kursen allein (Analystenmeinungen von damals sind unbekannt), mindestens 15 Tage Abstand. Grüne Punkte im Kurs-Chart zeigen die Buy-the-Dip-Tage. Wenige Signale: vorsichtig deuten, vergangene Ergebnisse sind keine Garantie.'));
+  return c;
+}
+function zeichneAnalyseChart(box, reihe, marker = []) {
   box.textContent = '';
   const W = box.clientWidth, H = box.clientHeight || 230;
   if (!W || reihe.length < 2) { box.append(el('div', 'platzhalter', 'Noch zu wenig Tageskurse für den Chart.')); return; }
@@ -1029,6 +1153,13 @@ function zeichneAnalyseChart(box, reihe) {
     const pfad = svgEl('path', {d, fill: 'none', 'stroke-width': sw, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, svg);
     pfad.style.stroke = farbe; if (dash) pfad.setAttribute('stroke-dasharray', dash);
   });
+  const index = new Map(reihe.map((p, i) => [p.d, i]));
+  marker.forEach(d => {
+    const i = index.get(d); if (i == null) return;
+    const c = svgEl('circle', {cx: x(i), cy: y(reihe[i].k), r: 5.5, 'stroke-width': 2.5}, svg);
+    c.style.fill = 'var(--up)'; c.style.stroke = 'var(--karte)';
+    const t = svgEl('title', {}, c); t.textContent = 'Buy-the-Dip-Signal ' + datum(d);
+  });
 }
 function maleAnalyseWert(s) {
   const box = $('wpAnalyse'), a = analyseDetail[s], k = analyseVon(s);
@@ -1045,7 +1176,7 @@ function maleAnalyseWert(s) {
     rechts.firstChild.style.marginBottom = '8px';
     kopf.append(scoreRing(a.score, a.ton), rechts);
     c1.append(kopf, gruendeListe(a, 2),
-      el('p', 'an-hinweis', 'Score = 60 % Technik (' + a.signale.filter(x => !x.info).length + ' Indikatoren aus ' + a.kennzahlen.tage + ' Tageskursen, gewichtet nach Trendstärke) + 40 % Analysten (Empfehlung, Kursziel, Gewinnrevisionen). Ab 58 „Eher kaufen“, ab 70 „Kaufen“, unter 42 „Eher abwarten“.'));
+      el('p', 'an-hinweis', 'Score = 45 % Technik (' + a.signale.filter(x => !x.info).length + ' Indikatoren aus ' + a.kennzahlen.tage + ' Tageskursen, gewichtet nach Trendstärke) + 35 % Analysten (Empfehlung, Kursziel, Gewinnrevisionen) + 20 % Bewertung (KGV, PEG, Free Cashflow). Ab 58 „Eher kaufen“, ab 70 „Kaufen“, unter 42 „Eher abwarten“.'));
     // Analysten
     const c2 = el('div', 'an-karte'), an = a.analysten;
     if (an && k && k.empfehlung) {
@@ -1086,8 +1217,8 @@ function maleAnalyseWert(s) {
     kennzahl(kzBox, 'Gewinnschätzungen', a.revisionen == null ? '–' : a.revisionen > 0.2 ? 'steigen' : a.revisionen < -0.2 ? 'sinken' : 'stabil', a.revisionen == null ? '' : a.revisionen > 0.2 ? 'up' : a.revisionen < -0.2 ? 'down' : '');
     kennzahl(kzBox, '52 Wochen Tief', geld(kz.tief52));
     c4.append(ck, chart, kzBox, ...c4kopf);
-    raster.append(c1, c2, c3, c4);
-    requestAnimationFrame(() => zeichneAnalyseChart(chart, a.chart || []));
+    raster.append(c1, c2, c3, c4, bewertungKarte(a), backtestKarte(a));
+    requestAnimationFrame(() => zeichneAnalyseChart(chart, a.chart || [], a.backtest ? a.backtest.dip.tage : []));
   });
 }
 function aktienAnalyseListe(box) {
@@ -1179,6 +1310,8 @@ function maleAnalytics() {
   const g = $('anGewinn'); g.textContent = vz(stand.gv); g.className = 'gross ' + richtung(stand.gv);
   deltaSetzen($('anRendite'), 0, stand.gvp, true);
   const pos = stand.zeilen || [];
+  const auto = stand.auto_dip || {};
+  $('anAutoText').textContent = auto.aktiv ? 'an · ' + geldKurz(auto.betrag) + ' je Signal' : 'aus';
   ersetzeWennNeu($('anAktien'), JSON.stringify((stand.universum || []).map(u => { const a = analyseVon(u.symbol) || {}; return [u.symbol, a.score, a.technik, a.analysten_score, quote(u.symbol).last, !!zeileVon(u.symbol), a.dip && a.dip.status]; })), aktienAnalyseListe);
   const dips = (stand.universum || []).map(u => [u, dipVon(u.symbol)]).filter(([, d]) => d);
   ersetzeWennNeu($('anDip'), JSON.stringify(dips.map(([u, d]) => [u.symbol, d.status, Math.round(d.rueckgang * 10), d.erfuellt])), box => {
@@ -1278,6 +1411,7 @@ function maleWert() {
   const an = analyseVon(s), sw = $('wpScoreWert');
   sw.textContent = an && an.ok ? an.score + ' · ' + an.urteil : '–'; sw.className = 'k-wert ' + (an && an.ok ? an.ton : '');
   maleAnalyseWert(s);
+  maleAuftraege(s);
   $('wpInfo').textContent = (stand.infos || {})[s] || (papier.branche ? 'Branche: ' + papier.branche + '.' : 'Für dieses Wertpapier ist keine Beschreibung hinterlegt.');
   $('wpEntfernen').hidden = !!z || !!planVon(s);
   const plan = planVon(s);
@@ -1300,6 +1434,240 @@ function maleWert() {
     liste.forEach(u => box.append(umsatzReihe(u)));
     if (!liste.length) box.append(el('p', 'leer', 'Noch keine Orders für dieses Wertpapier.'));
   });
+}
+
+/* ---------- Aufträge und Alarme ---------- */
+function auftragBeschreibung(a) {
+  const menge = a.art === 'limit_kauf' ? geld(a.betrag) : a.alles ? 'ganze Position' : STK4.format(a.stueck) + ' Stück';
+  const kurs = a.art === 'trailing' ? ZAHL1.format(a.abstand) + ' % unter Höchstkurs · Stopp jetzt ' + geld(a.stopp) : geld(a.limit);
+  return [ART_NAME[a.art] + ' · ' + kurs, menge + ' · seit ' + zeitText(a.angelegt)];
+}
+function maleAuftraege(s) {
+  const auftr = (stand.auftraege || []).filter(a => a.symbol === s), alarme = (stand.alarme || []).filter(a => a.symbol === s);
+  ersetzeWennNeu($('wpAuftraege'), JSON.stringify([s, auftr, alarme]), box => {
+    const weg = (pfadName, id, text) => { const b = knopf('s-icon klein-x', null, async () => { const r = await post(pfadName, {aktion: 'loeschen', id}); toast(r.text, !r.ok); tick(); }, text); b.innerHTML = ICON.zu; return b; };
+    auftr.forEach(a => {
+      const z = el('div', 'reihe statisch auftrag-zeile'), i = el('div', 'logo meld-icon ' + (a.art === 'limit_kauf' ? 'chance' : a.art === 'limit_verkauf' ? 'zahlen' : 'messer'));
+      i.innerHTML = a.art === 'limit_kauf' ? ICON.plus : a.art === 'limit_verkauf' ? ICON.haken : DIP_ICON('messer');
+      const [t, u] = auftragBeschreibung(a), m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', t), el('div', 'r-unter', u));
+      z.append(i, m, weg('/auftrag', a.id, 'Auftrag löschen')); box.append(z);
+    });
+    alarme.forEach(a => {
+      const z = el('div', 'reihe statisch auftrag-zeile'), i = el('div', 'logo meld-icon zahlen'); i.innerHTML = MELD_ICON.alarm;
+      const t = a.art === 'einschaetzung' ? 'Alarm: Einschätzung ändert sich' : 'Alarm: Kurs ' + (a.art === 'ueber' ? 'über ' : 'unter ') + geld(a.wert);
+      const m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', t), el('div', 'r-unter', a.art === 'einschaetzung' ? 'aktuell „' + (a.urteil || '…') + '“ · bleibt aktiv' : 'meldet sich einmal'));
+      z.append(i, m, weg('/alarm', a.id, 'Alarm löschen')); box.append(z);
+    });
+    if (!auftr.length && !alarme.length) box.append(el('p', 'leer', 'Keine offenen Aufträge. Limit, Stop-Loss, Take-Profit und Trailing-Stop wählst du beim Kaufen oder Verkaufen unter „Orderart“.'));
+  });
+}
+function screenAlarm(symbol) {
+  return (body, nav) => {
+    const k = quote(symbol).last;
+    let art = 'unter';
+    const arten = el('div', 'arten');
+    const feld = el('div', 'preisfeld'), lab = el('label', null, 'Kurs in €'), input = el('input'), pz = el('div', 'preis-zeile');
+    input.inputMode = 'decimal'; input.id = 'alarmKurs'; lab.htmlFor = input.id; pz.append(input, el('span', 'einheit', '€')); feld.append(lab, pz);
+    const meldung = el('div', 'meldung');
+    function malen() {
+      arten.textContent = '';
+      [['unter', 'Kurs fällt unter'], ['ueber', 'Kurs steigt über'], ['einschaetzung', 'Einschätzung ändert sich']].forEach(([a, t]) => {
+        const b = knopf('art-chip', t, () => { art = a; if (k && a !== 'einschaetzung') input.value = ZAHL2.format(k * (a === 'unter' ? 0.95 : 1.05)); malen(); });
+        b.setAttribute('aria-pressed', art === a ? 'true' : 'false'); arten.append(b);
+      });
+      feld.hidden = art === 'einschaetzung';
+    }
+    if (k) input.value = ZAHL2.format(k * 0.95);
+    malen();
+    const los = knopfTI('knopf orange', 'Alarm anlegen', ICON.chev, async () => {
+      const r = await post('/alarm', {art, symbol, wert: art === 'einschaetzung' ? null : zahlAus(input.value)});
+      if (!r.ok) { meldung.textContent = r.text; meldung.className = 'meldung fehler'; return; }
+      toast(r.text); await tick(); nav.zu();
+    });
+    body.append(kopfPapier(symbol), el('h1', 's-titel', 'Kursalarm'), el('div', 's-unter', k ? 'Aktuell ' + geld(k) : ''), arten, feld,
+      el('p', 's-tipp', 'Du bekommst eine Mitteilung (Glocke, in der App und auf Wunsch am Desktop). Kursalarme melden sich einmal, der Alarm zur Einschätzung bleibt aktiv.'),
+      meldung, fuss(el('span'), los));
+    return {fokus: input, enter: () => los.click()};
+  };
+}
+function screenAutoDip() {
+  return (body, nav) => {
+    const a = stand.auto_dip || {};
+    let aktiv = !!a.aktiv;
+    const monat = new Date().toISOString().slice(0, 7), ausgegeben = (a.ausgegeben || {})[monat] || 0;
+    const schalter = knopf('schalter', null, () => { aktiv = !aktiv; malen(); });
+    const betrag = Betragsfeld({cent: Math.round((a.betrag || 250) * 100), label: 'Betrag je Signal'});
+    const grenze = el('input'); grenze.inputMode = 'decimal'; grenze.id = 'autoGrenze'; grenze.value = ZAHL0.format(a.max_monat || 1000);
+    const gFeld = el('div', 'preisfeld'), gLab = el('label', null, 'Höchstens pro Monat'), gz = el('div', 'preis-zeile');
+    gLab.htmlFor = grenze.id; gz.append(grenze, el('span', 'einheit', '€')); gFeld.append(gLab, gz);
+    const meldung = el('div', 'meldung');
+    function malen() { schalter.textContent = ''; schalter.append(el('span', null, aktiv ? 'An' : 'Aus')); schalter.setAttribute('aria-pressed', aktiv ? 'true' : 'false'); }
+    malen();
+    const speichern = knopfTI('knopf orange', 'Speichern', ICON.chev, async () => {
+      const r = await post('/auto-dip', {aktiv, cent: betrag.cent(), max_monat: zahlAus(grenze.value)});
+      if (!r.ok) { meldung.textContent = r.text; meldung.className = 'meldung fehler'; return; }
+      toast(r.text); await tick(); nav.zu();
+    });
+    const kopf = el('div', 'zeile'); kopf.style.cssText = 'border:0;margin-top:14px'; kopf.append(el('div', 'k', 'Automatisch kaufen'), schalter);
+    body.append(el('h1', 's-titel', 'Automatischer Dip-Kauf'), el('div', 's-unter', 'Kauft bei jedem Buy-the-Dip-Signal deiner Watchlist'), kopf,
+      betrag.el, el('div', 'bf-unter', 'je Signal, zzgl. ' + geld(stand.gebuehr) + ' Gebühr'), gFeld,
+      el('p', 's-tipp', 'Diesen Monat automatisch gekauft: ' + geld(ausgegeben) + '. Gekauft wird nur, wenn ein Signal neu entsteht, genug Cash da ist und die Monatsgrenze nicht überschritten wird. Jeder Kauf erscheint als Mitteilung.'),
+      meldung, fuss(el('span'), speichern));
+    return {fokus: schalter};
+  };
+}
+
+/* ---------- Mehrere Depots ---------- */
+function screenDepots() {
+  return (body, nav) => {
+    const liste = stand.depots || [];
+    body.append(el('h1', 's-titel', 'Depots'), el('div', 's-unter', liste.length + (liste.length === 1 ? ' Depot' : ' Depots') + ' · antippen zum Wechseln'));
+    const box = el('div', 'liste'); box.style.marginTop = '14px';
+    liste.forEach(d => {
+      const aktiv = d.id === stand.depot_id;
+      const b = knopf('reihe depot-reihe' + (aktiv ? ' aktiv' : ''), null, async () => {
+        if (aktiv) { nav.zu(); return; }
+        const r = await post('/depots', {aktion: 'wechseln', id: d.id}); toast(r.text, !r.ok);
+        if (r.ok) { nav.zu(); verlaufPf = []; verlaufAn = []; verlaufZeit = 0; await tick(); zeigeSeite('portfolio'); }
+      });
+      const l = el('div', 'logo', (d.titel || '?').charAt(0).toUpperCase()); l.style.background = aktiv ? 'var(--akzent)' : 'var(--karte-3)'; l.style.color = '#fff';
+      const m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', d.titel), el('div', 'r-unter', aktiv ? 'geöffnet · ' + geld(stand.wert) : d.wert != null ? 'zuletzt ' + geld(d.wert) : 'noch nicht geöffnet'));
+      const r = el('div', 'r-rechts');
+      const gv = aktiv ? stand.gv : d.gv;
+      if (gv != null) r.append(el('div', 'r-betrag ' + richtung(gv), vz(gv)));
+      b.append(l, m, r); box.append(b);
+      if (!aktiv) {                                           // Löschen mit Nachfrage
+        let sicher = false;
+        const weg = knopf('textknopf rot depot-weg', 'Löschen', async e => {
+          e.stopPropagation();
+          if (!sicher) { sicher = true; weg.textContent = 'Wirklich „' + d.titel + '“ löschen?'; return; }
+          const x = await post('/depots', {aktion: 'loeschen', id: d.id}); toast(x.text, !x.ok); await tick(); nav.stapel[nav.stapel.length - 1] = screenDepots(); nav.zeigen(false);
+        });
+        box.append(weg);
+      }
+    });
+    body.append(box);
+    const umbenennen = option(ICON.liste, 'Geöffnetes Depot umbenennen', () => nav.weiter(screenDepotName()), true);
+    body.append(el('h3', null, 'Verwalten'), option(ICON.plus, 'Neues Depot anlegen', () => nav.weiter(screenDepotNeu()), true), umbenennen,
+      el('p', 's-tipp', 'Jedes Depot hat eigenes Cash, eigene Positionen, Watchlist, Sparpläne, Aufträge und Mitteilungen. Kurse und Aufträge laufen nur im geöffneten Depot.'));
+    return {};
+  };
+}
+function screenDepotName() {
+  return (body, nav) => {
+    const f = el('div', 'feld'), l = el('label', null, 'Name'), i = el('input'); i.id = 'depotName'; l.htmlFor = i.id; i.value = stand.titel || ''; i.maxLength = 40; f.append(l, i);
+    const meldung = el('div', 'meldung');
+    const los = knopfTI('knopf orange', 'Speichern', ICON.chev, async () => {
+      const r = await post('/depots', {aktion: 'umbenennen', id: stand.depot_id, titel: i.value});
+      if (!r.ok) { meldung.textContent = r.text; meldung.className = 'meldung fehler'; return; }
+      toast(r.text); await tick(); nav.zu();
+    });
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); los.click(); } });
+    body.append(el('h1', 's-titel', 'Depot umbenennen'), f, meldung, fuss(el('span'), los));
+    return {fokus: i};
+  };
+}
+function screenDepotNeu() {
+  return (body, nav) => {
+    const positionen = [];                                   // {isin, name, symbol, yahoo, anteile, einstand}
+    const nf = el('div', 'feld'), nl = el('label', null, 'Name'), name = el('input'); name.id = 'neuName'; nl.htmlFor = name.id;
+    name.placeholder = 'z. B. Dividenden, Tech, Dip-Jäger'; name.maxLength = 40; nf.append(nl, name);
+    const cash = Betragsfeld({cent: 1000000, label: 'Startguthaben in Euro'});
+    const posBox = el('div', 'start-positionen');
+    const such = el('div', 'suchfeld'); such.innerHTML = ICON.suche;
+    const si = el('input'); si.type = 'search'; si.placeholder = 'Aktie für den Anfangsbestand suchen'; si.autocomplete = 'off'; such.append(si);
+    const treffer = el('div', 'liste');
+    const meldung = el('div', 'meldung'), summe = el('div', 's-info');
+    function positionenMalen() {
+      posBox.textContent = '';
+      positionen.forEach((p, i) => {
+        const z = el('div', 'start-pos');
+        const kopf = el('div', 'start-kopf'); kopf.append(logo(p.symbol, 'klein'), el('b', null, p.name));
+        const weg = knopf('s-icon klein-x', null, () => { positionen.splice(i, 1); positionenMalen(); }, 'Entfernen'); weg.innerHTML = ICON.zu; kopf.append(weg);
+        const eingabe = (label, key, platz) => {
+          const f = el('label', 'mini-feld'); f.append(el('span', null, label));
+          const inp = el('input'); inp.inputMode = 'decimal'; inp.placeholder = platz; inp.value = p[key] != null ? String(p[key]).replace('.', ',') : '';
+          inp.addEventListener('input', () => { p[key] = zahlAus(inp.value); rechnen(); }); f.append(inp); return f;
+        };
+        const reiheE = el('div', 'start-eingaben'); reiheE.append(eingabe('Stück', 'anteile', 'z. B. 10'), eingabe('Kaufkurs in €', 'einstand', 'z. B. 180,50'));
+        z.append(kopf, reiheE); posBox.append(z);
+      });
+      rechnen();
+    }
+    function rechnen() {
+      const inv = positionen.reduce((s_, p) => s_ + (p.anteile || 0) * (p.einstand || 0), 0);
+      summe.textContent = positionen.length ? 'Anfangsbestände: ' + geld(inv) + ' · Depot startet mit ' + geld(inv + cash.cent() / 100) : '';
+    }
+    let nr = 0, uhr;
+    si.addEventListener('input', () => { clearTimeout(uhr); uhr = setTimeout(async () => {
+      const q = si.value.trim(), meins = ++nr; treffer.textContent = ''; if (!q) return;
+      const d = await (await fetch('/suche?q=' + encodeURIComponent(q))).json(); if (meins !== nr) return;
+      d.filter(t => !positionen.some(p => p.isin === t.isin)).slice(0, 5).forEach(t => {
+        const b = knopf('reihe', null, () => {
+          const k = quote(t.symbol).last;
+          positionen.push({isin: t.isin, name: t.name, symbol: t.symbol, yahoo: t.yahoo, anteile: null, einstand: k ? Math.round(k * 100) / 100 : null});
+          si.value = ''; treffer.textContent = ''; positionenMalen();
+          const inputs = posBox.querySelectorAll('input'); if (inputs.length) inputs[inputs.length - 2].focus();
+        });
+        const m = el('div', 'r-mitte'); m.append(el('div', 'r-titel', t.name), el('div', 'r-unter', t.symbol + ' · ' + t.isin));
+        const pl = el('span', 'plus-knopf'); pl.innerHTML = ICON.plus; const r = el('div', 'r-rechts'); r.append(pl);
+        b.append(logo(t.symbol), m, r); treffer.append(b);
+      });
+    }, 180); });
+    cash.input.addEventListener('input', rechnen);
+    const los = knopfTI('knopf orange', 'Depot anlegen', ICON.chev, async () => {
+      const unvollstaendig = positionen.find(p => !p.anteile || !p.einstand);
+      if (unvollstaendig) { meldung.textContent = 'Bitte Stück und Kaufkurs für ' + unvollstaendig.name + ' angeben.'; meldung.className = 'meldung fehler'; return; }
+      los.classList.add('laedt');
+      const r = await post('/depots', {aktion: 'anlegen', titel: name.value, cent: cash.cent(), positionen});
+      los.classList.remove('laedt');
+      if (!r.ok) { meldung.textContent = r.text; meldung.className = 'meldung fehler'; return; }
+      toast(r.text); nav.zu(); verlaufPf = []; verlaufAn = []; verlaufZeit = 0; await tick(); zeigeSeite('portfolio');
+    });
+    body.append(el('h1', 's-titel', 'Neues Depot'), el('div', 's-unter', 'Startguthaben und Anfangsbestände legst du selbst fest'), nf,
+      el('div', 's-label', 'Startguthaben (Cash)'), cash.el,
+      el('h3', null, 'Anfangsbestände (optional)'), el('p', 's-tipp', 'Aktien, die du schon „besitzt“: Stückzahl und dein Kaufkurs. Sie werden ohne Gebühr eingebucht; Gewinn und Verlust rechnen ab diesem Kaufkurs.'),
+      posBox, such, treffer, summe, meldung, fuss(el('span'), los));
+    rechnen();
+    return {fokus: name, hoch: true};
+  };
+}
+
+/* ---------- Wochenbericht ---------- */
+function screenBericht() {
+  return (body, nav) => {
+    body.append(el('h1', 's-titel', 'Wochenbericht'), el('p', 'leer', 'Wird erstellt …'));
+    fetch('/bericht').then(r => r.json()).then(b => {
+      body.textContent = '';
+      body.append(el('h1', 's-titel', 'Wochenbericht'), el('div', 's-unter', datum(b.von) + ' bis ' + datum(b.bis) + ' · ' + (stand.titel || '')));
+      if (b.wert) {
+        const g = el('div', 'bericht-gross'); g.append(el('b', richtung(b.wert.diff), vz(b.wert.diff)), el('span', null, (b.wert.pct != null ? vzp(b.wert.pct) + ' · ' : '') + 'Depot jetzt ' + geld(b.wert.jetzt)));
+        body.append(g);
+      }
+      const abschnitt = (titel, kinder) => { body.append(el('h3', null, titel)); const k = el('div', 'karte'); kinder(k); body.append(k); };
+      if (b.positionen.length) abschnitt('Deine Positionen diese Woche', k => b.positionen.forEach(p => reihe(k, p.name, vzp(p.pct) + ' · ' + vz(p.eur), richtung(p.pct))));
+      abschnitt('Orders', k => {
+        reihe(k, 'Käufe / Verkäufe', b.orders.kaeufe + ' / ' + b.orders.verkaeufe);
+        reihe(k, 'davon automatisch', String(b.orders.automatisch));
+        reihe(k, 'Volumen', geld(b.orders.volumen));
+      });
+      if (b.kaeufe.length) {
+        abschnitt('Wie deine Käufe gelaufen sind', k => b.kaeufe.forEach(x => {
+          const z = reihe(k, x.name + ' · ' + datum(x.zeit.slice(0, 10)) + (x.score != null ? ' · Score ' + x.score : ''), vzp(x.pct), richtung(x.pct));
+          if (x.quelle && QUELLE_NAME[x.quelle]) z.firstChild.textContent += ' · ' + QUELLE_NAME[x.quelle];
+        }));
+        const v = b.vergleich;
+        if (v.gut.anzahl || v.schwach.anzahl) body.append(el('p', 's-tipp', 'Käufe mit Score ab 58: ' + (v.gut.anzahl ? 'Ø ' + vzp(v.gut.pct) + ' (' + v.gut.anzahl + ')' : 'keine') +
+          ' · Käufe darunter: ' + (v.schwach.anzahl ? 'Ø ' + vzp(v.schwach.pct) + ' (' + v.schwach.anzahl + ')' : 'keine') + '. Mit der Zeit zeigt das, ob die Einschätzung bei deinen Käufen etwas taugt.'));
+      }
+      abschnitt('Signale', k => {
+        reihe(k, 'Signale diese Woche', String(b.signale.length));
+        if (b.dips_jetzt.length) b.dips_jetzt.forEach(d => reihe(k, 'Jetzt Buy the Dip: ' + d.name, 'Score ' + d.score, 'up'));
+        else reihe(k, 'Aktuelle Buy-the-Dip-Chancen', 'keine');
+      });
+    }).catch(() => { body.append(el('p', 'meldung fehler', 'Bericht konnte nicht geladen werden.')); });
+    return {hoch: true};
+  };
 }
 
 /* ---------- Rechte Leiste ---------- */
@@ -1588,8 +1956,14 @@ const mitStand = fn => () => { if (bereit()) fn(); };
 const einzahlenFlow = mitStand(() => { Sheet.oeffnen(screenUeberweisen(), false); Sheet.weiter(screenGeld({art: 'einzahlung'})); });
 document.querySelectorAll('.tab, .nav-item[data-s]').forEach(b => b.onclick = () => zeigeSeite(b.dataset.s));
 $('bSuche').onclick = $('nSuche').onclick = $('suchknopf').onclick = mitStand(() => Sheet.oeffnen(screenSuche('suche')));
-$('bUeberweisen').onclick = $('nUeberweisen').onclick = $('cUeberweisen').onclick = mitStand(() => Sheet.oeffnen(screenUeberweisen()));
-$('rEinzahlen').onclick = einzahlenFlow;
+$('bUeberweisen').onclick = $('nUeberweisen').onclick = mitStand(() => Sheet.oeffnen(screenUeberweisen()));
+const auszahlenFlow = mitStand(() => { Sheet.oeffnen(screenUeberweisen(), false); Sheet.weiter(screenGeld({art: 'auszahlung'})); });
+$('cEinzahlen').onclick = $('rEinzahlen').onclick = einzahlenFlow;
+$('cAuszahlen').onclick = $('rAuszahlen').onclick = auszahlenFlow;
+$('markeKnopf').onclick = mitStand(() => Sheet.oeffnen(screenDepots()));
+$('anBericht').onclick = mitStand(() => Sheet.oeffnen(screenBericht()));
+$('anAuto').onclick = mitStand(() => Sheet.oeffnen(screenAutoDip()));
+$('wpAlarmNeu').onclick = mitStand(() => Sheet.oeffnen(screenAlarm(gewaehlt)));
 $('bSparplan').onclick = mitStand(() => Sheet.oeffnen(screenSparplan(gewaehlt)));
 $('bHandeln').onclick = handelmenuAuf;
 $('kWatch').onclick = $('navWatch').onclick = $('rWatchAlle').onclick = mitStand(() => Sheet.oeffnen(screenSuche('watchlist')));
@@ -1669,4 +2043,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) tick
 
 zeigeSeite(letzteTab);
 tick();
+// Als App installierbar (PWA). Service Worker gehen nur über localhost oder https.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 setInterval(tick, 3000);

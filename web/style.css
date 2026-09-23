@@ -618,3 +618,60 @@ h3{font-size:19px;font-weight:800;margin:28px 0 6px}
   .lk:active,.knopf:active:not(:disabled),button.kachel:active,.reihe:active,.chip:active,.glocke:active{transform:scale(.97)}
   .zeitraum button:hover{background:var(--karte)}
 }
+
+/* ---------- Orderarten, Aufträge, Depots, Bericht ---------- */
+.knopf-paar{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hero-reihe .knopf-paar{min-width:380px}
+.lk.dunkel,.knopf.dunkel{background:var(--karte-2);color:var(--ink)}
+.lk.dunkel:hover{background:var(--karte-3)}
+button.marke{background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%;border-radius:18px;margin-bottom:22px;padding:8px 12px}
+button.marke:hover{background:var(--karte)}
+.marke-chev{width:18px;height:18px;margin-left:auto;color:var(--ink-3);flex:none}
+.arten{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
+.art-chip{border:1px solid var(--linie-2);background:none;color:var(--ink-2);font-weight:800;font-size:14px;padding:8px 13px;border-radius:999px;cursor:pointer}
+.art-chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#000}
+.preisfeld{display:grid;gap:8px;margin-top:16px}
+.preisfeld label{font-size:14px;font-weight:700;color:var(--ink-3)}
+.preis-zeile{display:flex;align-items:center;gap:10px;background:var(--karte-2);border:1px solid var(--linie-2);border-radius:16px;padding:0 16px;transition:border-color .15s}
+.preis-zeile:focus-within{border-color:var(--ink-3)}
+.preis-zeile input{flex:1;min-width:0;height:54px;border:0;background:none;color:var(--ink);font:inherit;font-size:22px;font-weight:800;outline:none;font-variant-numeric:tabular-nums}
+.preis-zeile input::placeholder{color:var(--ink-3);font-weight:600;font-size:17px}
+.einheit{font-size:18px;font-weight:800;color:var(--ink-3)}
+.chips.links{justify-content:flex-start;margin-top:4px}
+.art-info{font-size:13px;font-weight:600;color:var(--ink-3);line-height:1.5;margin-top:12px}
+.ticket .arten{margin:10px 0 2px}
+.ticket .preis-zeile input{height:46px;font-size:19px}
+.s-icon.klein-x{width:36px;height:36px;background:none;color:var(--ink-3)}
+.s-icon.klein-x svg{width:17px;height:17px}
+.auftrag-zeile{grid-template-columns:48px minmax(0,1fr) auto}
+.kopf-knoepfe{display:flex;gap:16px}
+.schalter{min-width:72px;height:38px;border-radius:999px;border:0;background:var(--karte-3);color:var(--ink-2);font-weight:800;font-size:15px;cursor:pointer}
+.schalter[aria-pressed="true"]{background:var(--up);color:#03170a}
+.bt-tabelle{display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:10px 12px;align-items:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.bt-tabelle > *:not(.bt-name){text-align:right}
+.bt-k{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.bt-name{display:flex;align-items:center;gap:8px;font-weight:800}
+.bt-name::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--ink-3);flex:none}
+.bt-name.chance::before{background:var(--up)} .bt-name.messer::before{background:var(--down)} .bt-name.basis{color:var(--ink-2)}
+.depot-reihe.aktiv{background:var(--karte)}
+.depot-weg{justify-self:end;margin:-6px 4px 6px 0;font-size:13px}
+.start-positionen{display:grid;gap:10px}
+.start-pos{background:var(--karte);border-radius:18px;padding:12px 14px;display:grid;gap:10px}
+.start-kopf{display:flex;align-items:center;gap:10px}
+.start-kopf b{flex:1;font-size:16px}
+.start-eingaben{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mini-feld{display:grid;gap:4px}
+.mini-feld span{font-size:12px;font-weight:700;color:var(--ink-3)}
+.mini-feld input{height:46px;border-radius:12px;border:1px solid var(--linie-2);background:var(--karte-2);color:var(--ink);font:inherit;font-size:17px;font-weight:800;padding:0 12px;outline:none;width:100%}
+.mini-feld input:focus{border-color:var(--ink-3)}
+.bericht-gross{display:grid;gap:2px;margin:18px 0 4px}
+.bericht-gross b{font-size:40px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.bericht-gross span{font-size:15px;font-weight:700;color:var(--ink-3)}
+@media (hover:hover) and (pointer:fine){
+  .art-chip:hover,.schalter:hover,button.marke:hover,.s-icon.klein-x:hover{transform:scale(1.06)}
+}
+@media (max-width:640px){ .hero-reihe .knopf-paar{min-width:0} .bt-tabelle{font-size:13px;gap:8px} }
+.preisfeld{grid-template-columns:minmax(0,1fr)}
+.preis-zeile input{width:100%}
+.bt-tabelle{grid-template-columns:minmax(0,2.1fr) repeat(3,minmax(0,1fr))}
+.bt-name{white-space:nowrap}

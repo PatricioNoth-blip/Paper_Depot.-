@@ -37,18 +37,22 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import analyse
+import auftraege
+import bericht
 import demo
+import depots
 import katalog
 
 HIER = Path(__file__).parent
 WEB = HIER / "web"
-DATEN = [HIER]                                            # --demo: HIER / "demo"
+DATEN = [HIER]                                            # Ordner des geöffneten Depots (depots/<id>)
 BERLIN = ZoneInfo("Europe/Berlin")
 HANDEL_VON, HANDEL_BIS = uhrzeit(7, 30), uhrzeit(22, 0)
 BETRAG_MAX = 99_999_999.99
 SPARPLAN_TAGE = (1, 2, 15, 16)
 SPARPLAN_MIN = 1.0
 DEMO = [False]
+AKTIV = [None]                      # ID des geöffneten Depots
 
 
 def pfad(name: str) -> Path:
@@ -90,6 +94,7 @@ START = {
 }
 
 SPERRE = threading.Lock()           # Orders, Kursabfrage und Analyse kommen aus verschiedenen Fäden
+WECKER = threading.Event()          # sofort neue Kurse holen (Depotwechsel, neue Aktie)
 
 
 # --- Hilfsmittel ------------------------------------------------------------
@@ -103,6 +108,10 @@ def zahl(text) -> float | None:
 
 def euro(v: float) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
+def stk(v: float) -> str:
+    return f"{v:.6f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def endlich(wert) -> float | None:
@@ -286,6 +295,10 @@ def bewerten(depot: dict, stand: dict) -> dict:
             "quotes": quotes, "sparplaene": depot.get("sparplaene", []), "infos": INFOS,
             "sparplan_tage": list(SPARPLAN_TAGE), "sparplan_min": SPARPLAN_MIN,
             "meldungen": list(reversed(depot.get("meldungen", [])))[:50],
+            "auftraege": [{**a, "stopp": auftraege.stoppkurs(a)} for a in depot.get("auftraege", [])],
+            "alarme": depot.get("alarme", []),
+            "auto_dip": depot.get("auto_dip") or {"aktiv": False, "betrag": 250, "max_monat": 1000},
+            "depot_id": AKTIV[0], "depots": depots.index()["depots"],
             "benachrichtigen": depot.get("benachrichtigen", True),
             "analyse": {u["symbol"]: kurz(Analyse.ergebnis(u["symbol"], quotes.get(u["symbol"], {}).get("last")))
                         for u in universum}}
@@ -298,6 +311,7 @@ def kurz(r: dict) -> dict:
     a = r.get("analysten") or {}
     d = r.get("dip") or {}
     return {k: r[k] for k in ("ok", "score", "urteil", "ton", "technik", "analysten_score", "potenzial", "pro", "contra")} \
+        | {"bewertung": (r.get("bewertung") or {}).get("score")} \
         | {"empfehlung": [a.get(k, 0) for k in ("stark_kaufen", "kaufen", "halten", "verkaufen", "stark_verkaufen")] if a else None,
            "dip": {k: d.get(k) for k in ("status", "text", "rueckgang", "erfuellt", "warnung")},
            "bis_zahlen": r["kennzahlen"].get("bis_zahlen"), "zahlen": r["kennzahlen"].get("zahlen")}
@@ -323,6 +337,8 @@ def meldungen_pruefen(depot: dict, zustand: dict) -> list:
         _kandidat[s] = (status, n + 1 if alt == status else 1)
         if _kandidat[s][1] >= 3 and stand.get(s) != status:
             stand[s] = status
+            if status == "chance":
+                auto_dip_kaufen(depot, s, a, neu)
             if status in ("chance", "messer"):
                 d = a["dip"]
                 neu.append({"art": status, "symbol": s, "titel": f"{DIP_TITEL[status]}: {namen.get(s, s)}",
@@ -334,12 +350,149 @@ def meldungen_pruefen(depot: dict, zustand: dict) -> list:
             neu.append({"art": "zahlen", "symbol": s, "titel": f"Quartalszahlen: {namen.get(s, s)}",
                         "text": "Zahlen " + ("heute" if bis == 0 else "morgen" if bis == 1 else f"in {bis} Tagen")
                                 + ". Der Kurs kann danach stark schwanken."})
-    for m in neu:
-        m.update({"id": f"{int(time.time() * 1000)}-{m['symbol']}-{m['art']}", "zeit": jetzt_iso(), "gelesen": False})
+    return melden(depot, neu)
+
+
+def melden(depot: dict, neu: list) -> list:
+    """Meldungen mit ID und Zeit speichern (die letzten 100 bleiben)."""
+    for i, m in enumerate(neu):
+        m.update({"id": f"{int(time.time() * 1000)}-{i}-{m.get('symbol', '')}-{m['art']}", "zeit": jetzt_iso(), "gelesen": False})
     if neu:
         depot["meldungen"] = (depot.get("meldungen", []) + neu)[-100:]
         speichern(depot)
     return neu
+
+
+def auto_dip_kaufen(depot: dict, symbol: str, a: dict, neu: list):
+    """Automatischer Kauf bei einem Buy-the-Dip-Signal, mit Monatsgrenze."""
+    auto = depot.get("auto_dip") or {}
+    if not auto.get("aktiv"):
+        return
+    monat = datetime.now(BERLIN).strftime("%Y-%m")
+    ausgegeben = (auto.setdefault("ausgegeben", {})).get(monat, 0.0)
+    betrag = float(auto.get("betrag", 0))
+    name = next((u["name"] for u in depot.get("universum", []) if u["symbol"] == symbol), symbol)
+    if ausgegeben + betrag > float(auto.get("max_monat", 0)) + 1e-9:
+        neu.append({"art": "auto", "symbol": symbol, "titel": f"Auto-Kauf ausgelassen: {name}",
+                    "text": f"Monatsgrenze von {euro(auto['max_monat'])} erreicht."})
+        return
+    r = order(depot, Server.letzte, "kaufen", symbol, betrag=betrag, quelle="auto-dip")
+    if r["ok"]:
+        auto["ausgegeben"][monat] = round(ausgegeben + betrag, 2)
+        neu.append({"art": "auto", "symbol": symbol, "titel": f"Automatisch gekauft: {name}",
+                    "text": f"{euro(betrag)} bei Buy-the-Dip-Signal (Score {a['score']}). {r['text']}"})
+    else:
+        neu.append({"art": "auto", "symbol": symbol, "titel": f"Auto-Kauf nicht ausgeführt: {name}", "text": r["text"]})
+
+
+# --- Aufträge (Limit, Stop) und Kursalarme ----------------------------------
+def auftrag_setzen(depot: dict, letzte: dict, wunsch: dict) -> dict:
+    liste = depot.setdefault("auftraege", [])
+    if wunsch.get("aktion") == "loeschen":
+        vorher = len(liste)
+        depot["auftraege"] = [a for a in liste if a["id"] != wunsch.get("id")]
+        speichern(depot)
+        return {"ok": len(depot["auftraege"]) < vorher, "text": "Auftrag gelöscht." if len(depot["auftraege"]) < vorher else "Auftrag nicht gefunden."}
+    art, symbol = wunsch.get("art"), wunsch.get("symbol", "")
+    papier = next((u for u in depot.get("universum", []) if u["symbol"] == symbol), None)
+    pos = next((p for p in depot["positionen"] if p["symbol"] == symbol), None)
+    if not papier:
+        return {"ok": False, "text": f"{symbol} steht nicht auf der Watchlist."}
+    limit, abstand = endlich(wunsch.get("limit")), endlich(wunsch.get("abstand"))
+    fehler = auftraege.pruefe_eingabe(art, limit, abstand, art == "limit_kauf" or pos is not None)
+    if fehler:
+        return {"ok": False, "text": fehler}
+    q = letzte.get(symbol) or {}
+    a = {"id": auftraege.neue_id("a"), "art": art, "symbol": symbol, "angelegt": jetzt_iso()}
+    if art == "limit_kauf":
+        betrag = betrag_aus(wunsch)
+        if not betrag or betrag <= 0:
+            return {"ok": False, "text": "Bitte einen Betrag angeben."}
+        a.update(betrag=betrag, limit=round(limit, 2))
+    else:
+        alles = bool(wunsch.get("alles"))
+        stueck = pos["anteile"] if alles else round((betrag_aus(wunsch) or 0) / ((q.get("bid") or q.get("last")) or 1), 6)
+        if stueck <= 0:
+            return {"ok": False, "text": "Bitte angeben, wie viel verkauft werden soll."}
+        a.update(stueck=min(stueck, pos["anteile"]), alles=alles)
+        if art == "trailing":
+            a.update(abstand=round(abstand, 2), hoechst=q.get("bid") or q.get("last"))
+        else:
+            a["limit"] = round(limit, 2)
+    liste.append(a)
+    speichern(depot)
+    return {"ok": True, "text": f"{auftraege.ARTEN[art]} für {papier['name']} angelegt.", "auftrag": a}
+
+
+def auftraege_ausfuehren(depot: dict, letzte: dict) -> list:
+    """Offene Aufträge gegen die aktuellen Kurse prüfen und ausgelöste ausführen."""
+    if not handel_offen() or not depot.get("auftraege"):
+        return []
+    neu, bleiben, geaendert = [], [], False
+    for a in depot["auftraege"]:
+        hoechst = a.get("hoechst")
+        if not auftraege.ausgeloest(a, letzte.get(a["symbol"]) or {}):
+            geaendert |= a.get("hoechst") != hoechst
+            bleiben.append(a)
+            continue
+        geaendert = True
+        name = next((u["name"] for u in depot.get("universum", []) if u["symbol"] == a["symbol"]), a["symbol"])
+        if a["art"] == "limit_kauf":
+            r = order(depot, letzte, "kaufen", a["symbol"], betrag=a["betrag"], quelle=a["art"])
+        else:
+            pos = next((p for p in depot["positionen"] if p["symbol"] == a["symbol"]), None)
+            r = (order(depot, letzte, "verkaufen", a["symbol"], stueck=min(a["stueck"], pos["anteile"]),
+                       alles=a.get("alles") or a["stueck"] >= pos["anteile"] - 1e-6, quelle=a["art"])
+                 if pos else {"ok": False, "text": "Keine Position mehr vorhanden."})
+        titel = f"{auftraege.ARTEN[a['art']]} ausgeführt: {name}" if r["ok"] else f"{auftraege.ARTEN[a['art']]} nicht ausgeführt: {name}"
+        neu.append({"art": "auftrag", "symbol": a["symbol"], "titel": titel, "text": r["text"]})
+    depot["auftraege"] = bleiben
+    if geaendert:
+        speichern(depot)
+    return melden(depot, neu)
+
+
+def alarm_setzen(depot: dict, wunsch: dict) -> dict:
+    liste = depot.setdefault("alarme", [])
+    if wunsch.get("aktion") == "loeschen":
+        depot["alarme"] = [a for a in liste if a["id"] != wunsch.get("id")]
+        speichern(depot)
+        return {"ok": True, "text": "Alarm gelöscht."}
+    art, symbol, wert = wunsch.get("art"), wunsch.get("symbol", ""), endlich(wunsch.get("wert"))
+    if art not in auftraege.ALARM_ARTEN or not any(u["symbol"] == symbol for u in depot.get("universum", [])):
+        return {"ok": False, "text": "Ungültiger Alarm."}
+    if art != "einschaetzung" and (not wert or wert <= 0):
+        return {"ok": False, "text": "Bitte einen Kurs angeben."}
+    if art == "einschaetzung" and any(a["symbol"] == symbol and a["art"] == art for a in liste):
+        return {"ok": False, "text": "Für diese Aktie gibt es den Alarm schon."}
+    liste.append({"id": auftraege.neue_id("al"), "art": art, "symbol": symbol,
+                  "wert": round(wert, 2) if wert else None, "angelegt": jetzt_iso()})
+    speichern(depot)
+    return {"ok": True, "text": "Alarm angelegt."}
+
+
+def alarme_pruefen(depot: dict, letzte: dict, zustand: dict) -> list:
+    neu, bleiben = [], []
+    for al in depot.get("alarme", []):
+        text = auftraege.alarm_ausgeloest(al, letzte.get(al["symbol"]) or {}, (zustand.get("analyse") or {}).get(al["symbol"]))
+        name = next((u["name"] for u in depot.get("universum", []) if u["symbol"] == al["symbol"]), al["symbol"])
+        if text:
+            neu.append({"art": "alarm", "symbol": al["symbol"], "titel": f"Kursalarm: {name}", "text": text})
+        if not text or al["art"] == "einschaetzung":     # Kursalarme gelten einmal, Einschätzung bleibt
+            bleiben.append(al)
+    depot["alarme"] = bleiben
+    return melden(depot, neu)
+
+
+def auto_dip_setzen(depot: dict, wunsch: dict) -> dict:
+    betrag, grenze = betrag_aus(wunsch), endlich(wunsch.get("max_monat"))
+    aktiv = bool(wunsch.get("aktiv"))
+    if aktiv and (not betrag or betrag < 1 or not grenze or grenze < betrag):
+        return {"ok": False, "text": "Betrag je Signal (ab 1 €) und eine Monatsgrenze ab diesem Betrag angeben."}
+    auto = depot.setdefault("auto_dip", {})
+    auto.update(aktiv=aktiv, betrag=betrag or auto.get("betrag", 250), max_monat=grenze or auto.get("max_monat", 1000))
+    speichern(depot)
+    return {"ok": True, "text": "Automatischer Dip-Kauf " + ("an." if aktiv else "aus.")}
 
 
 # --- Aktien suchen und zur Watchlist hinzufügen -----------------------------
@@ -444,7 +597,7 @@ def order(depot: dict, letzte: dict, richtung: str, symbol: str,
         pos["gebuehr"] = round(pos.get("gebuehr", 0) + gebuehr, 2)
         depot["cash"] = round(depot["cash"] - betrag - gebuehr, 2)
         fluss = -round(betrag + gebuehr, 2)
-        text = f"Gekauft: {anteile:.6f} Stück {papier['name']} zu {euro(kurs)}, Gebühr {euro(gebuehr)}."
+        text = f"Gekauft: {stk(anteile)} Stück {papier['name']} zu {euro(kurs)}, Gebühr {euro(gebuehr)}."
     else:
         if pos is None or pos["anteile"] <= 0:
             return {"ok": False, "code": "eingabe", "text": f"Du hältst keine Anteile von {papier['name']}."}
@@ -459,7 +612,7 @@ def order(depot: dict, letzte: dict, richtung: str, symbol: str,
             return {"ok": False, "code": "eingabe", "text": "Bitte Stückzahl oder Betrag angeben."}
         if anteile > pos["anteile"] + 1e-6:
             return {"ok": False, "code": "bestand",
-                    "text": f"Du hältst nur {pos['anteile']:.6f} Stück (zurzeit {euro(pos['anteile'] * kurs)} wert)."}
+                    "text": f"Du hältst nur {stk(pos['anteile'])} Stück (zurzeit {euro(pos['anteile'] * kurs)} wert)."}
         anteile = min(anteile, pos["anteile"])
         if anteile * kurs <= gebuehr:
             return {"ok": False, "code": "eingabe",
@@ -473,7 +626,7 @@ def order(depot: dict, letzte: dict, richtung: str, symbol: str,
         fluss = erloes
         if pos["anteile"] <= 1e-6:
             depot["positionen"] = [p for p in depot["positionen"] if p["symbol"] != symbol]
-        text = f"Verkauft: {anteile:.6f} Stück {papier['name']} zu {euro(kurs)}, Erlös {euro(erloes)}."
+        text = f"Verkauft: {stk(anteile)} Stück {papier['name']} zu {euro(kurs)}, Erlös {euro(erloes)}."
 
     eintrag = {"zeit": jetzt_iso(), "richtung": richtung, "symbol": symbol, "stueck": anteile,
                "kurs": kurs, "gebuehr": gebuehr, "betrag": round(anteile * kurs, 2), "fluss": fluss}
@@ -711,7 +864,77 @@ def export_csv(depot: dict) -> bytes:
 
 # --- Webserver --------------------------------------------------------------
 DATEITYPEN = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-              ".js": "text/javascript; charset=utf-8"}
+              ".js": "text/javascript; charset=utf-8", ".png": "image/png",
+              ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
+_backtest_cache: dict = {}          # (Symbol, letzter Tag, Anzahl Tage) → Ergebnis
+
+
+def backtest_holen(symbol: str) -> dict | None:
+    tage = Analyse.tage.get(symbol) or []
+    if not tage:
+        return None
+    schluessel = (symbol, tage[-1][0], len(tage))
+    if schluessel not in _backtest_cache:
+        _backtest_cache[schluessel] = analyse.backtest(tage)
+    return _backtest_cache[schluessel]
+
+
+def wochenbericht_erstellen(depot: dict, zustand: dict) -> dict:
+    vor = {}
+    for u in depot.get("universum", []):
+        t = Analyse.tage.get(u["symbol"]) or []
+        if len(t) >= 6:
+            vor[u["symbol"]] = t[-5][1]
+    return bericht.wochenbericht(depot, verlauf("MAX"), zustand.get("quotes") or {}, vor,
+                                 zustand.get("analyse") or {}, datetime.now())
+
+
+def wochenbericht_melden(depot: dict) -> list:
+    """Einmal pro Kalenderwoche: Mitteilung, dass der Wochenbericht da ist."""
+    woche = datetime.now(BERLIN).strftime("%G-W%V")
+    if depot.get("bericht_woche") == woche:
+        return []
+    depot["bericht_woche"] = woche
+    return melden(depot, [{"art": "bericht", "symbol": "", "titel": "Dein Wochenbericht ist da",
+                           "text": "Depot, Signale und wie deine Käufe seitdem gelaufen sind."}])
+
+
+def depot_oeffnen(depot_id: str):
+    """Depot laden und zum aktiven machen (Aufrufer hält SPERRE)."""
+    AKTIV[0], DATEN[0] = depot_id, depots.ordner(depot_id)
+    Server.depot = depot_laden()
+    ix = depots.index()
+    ix["aktiv"] = depot_id
+    depots.index_speichern(ix)
+    _kandidat.clear()
+    threading.Thread(target=Analyse.auffrischen, args=(list(Server.depot.get("universum", [])),), daemon=True).start()
+    WECKER.set()
+
+
+def depots_setzen(wunsch: dict) -> dict:
+    aktion = wunsch.get("aktion")
+    if aktion == "wechseln":
+        if not any(d["id"] == wunsch.get("id") for d in depots.index()["depots"]):
+            return {"ok": False, "text": "Dieses Depot gibt es nicht."}
+        speichern(Server.depot)
+        depot_oeffnen(wunsch["id"])
+        return {"ok": True, "text": f"Depot „{Server.depot.get('titel')}“ geöffnet."}
+    if aktion == "anlegen":
+        cash = betrag_aus(wunsch) or 0.0
+        r = depots.anlegen(wunsch.get("titel", ""), cash, wunsch.get("positionen") or [],
+                           wunsch.get("universum") or UNIVERSUM, jetzt_iso())
+        if r["ok"] and wunsch.get("oeffnen", True):
+            speichern(Server.depot)
+            depot_oeffnen(r["id"])
+        return r
+    if aktion == "umbenennen":
+        r = depots.umbenennen(wunsch.get("id", ""), wunsch.get("titel", ""))
+        if r["ok"] and wunsch.get("id") == AKTIV[0]:
+            Server.depot["titel"] = wunsch["titel"].strip()[:40]
+        return r
+    if aktion == "loeschen":
+        return depots.loeschen(wunsch.get("id", ""))
+    return {"ok": False, "text": "Unbekannte Aktion."}
 
 
 class Server(BaseHTTPRequestHandler):
@@ -749,7 +972,11 @@ class Server(BaseHTTPRequestHandler):
             r = Analyse.ergebnis(s, live)
             if r.get("ok"):
                 r["chart"] = analyse.chartreihe(Analyse.tage.get(s, []), live, datetime.now(BERLIN).date().isoformat())
+                r["backtest"] = backtest_holen(s)
             self._json(r)
+        elif weg == "/bericht":
+            with SPERRE:
+                self._json(wochenbericht_erstellen(Server.depot, Server.zustand))
         elif weg == "/export.csv":
             with SPERRE:
                 inhalt = export_csv(Server.depot)
@@ -781,6 +1008,14 @@ class Server(BaseHTTPRequestHandler):
                 antwort = sparplan_setzen(Server.depot, wunsch)
             elif self.path == "/watchlist":
                 antwort = watchlist_setzen(Server.depot, wunsch)
+            elif self.path == "/auftrag":
+                antwort = auftrag_setzen(Server.depot, Server.letzte, wunsch)
+            elif self.path == "/alarm":
+                antwort = alarm_setzen(Server.depot, wunsch)
+            elif self.path == "/auto-dip":
+                antwort = auto_dip_setzen(Server.depot, wunsch)
+            elif self.path == "/depots":
+                antwort = depots_setzen(wunsch)
             elif self.path == "/meldungen":
                 if "benachrichtigen" in wunsch:
                     Server.depot["benachrichtigen"] = bool(wunsch["benachrichtigen"])
@@ -790,6 +1025,8 @@ class Server(BaseHTTPRequestHandler):
                 antwort = {"ok": True}
             else:
                 antwort = {"ok": False, "text": "Unbekannte Anfrage."}
+            if self.path == "/watchlist" and antwort.get("ok"):
+                WECKER.set()
             if antwort.get("ok"):
                 Server.zustand = bewerten(Server.depot, Server.letzte)
         self._json(antwort)
@@ -812,24 +1049,28 @@ def eigene_ip() -> str:
 
 
 def depot_laden() -> dict:
-    datei = pfad("depot.json")
-    if datei.exists():
-        return json.loads(datei.read_text(encoding="utf-8"))
-    DATEN[0].mkdir(exist_ok=True)
+    return json.loads(pfad("depot.json").read_text(encoding="utf-8"))
+
+
+def erstes_depot() -> str:
+    """Beim allerersten Start: Musterdepot anlegen (im Demo mit 1.000 € Guthaben und Tagesverlauf)."""
     depot = json.loads(json.dumps(START))
-    if DEMO[0]:                                           # Demo: 1.000 € Guthaben zum Ausprobieren
+    if DEMO[0]:
         depot["cash"], depot["eingezahlt"] = 1000.0, depot["eingezahlt"] + 1000.0
         depot["buchungen"] = [{"zeit": "2026-09-23T10:15:00+02:00", "art": "einzahlung", "betrag": 1000.0}]
-    datei.write_text(json.dumps(depot, indent=1, ensure_ascii=False), encoding="utf-8")
-    print(f"Depot angelegt: {datei}")
+    ordner = depots.ordner("haupt")
+    ordner.mkdir(parents=True, exist_ok=True)
+    (ordner / "depot.json").write_text(json.dumps(depot, indent=1, ensure_ascii=False), encoding="utf-8")
+    depots.index_speichern({"aktiv": "haupt", "depots": [{"id": "haupt", "titel": depot["titel"], "angelegt": jetzt_iso()}]})
     if DEMO[0]:                                           # Demo: Tagesverlauf bis jetzt vorbelegen
         papiere, verlauf_ = demo.tagesverlauf(depot["universum"], depot["positionen"], depot["cash"],
                                               depot["eingezahlt"], datetime.now(BERLIN))
         for name, kopf, zeilen in (("papiere.csv", ["zeit", "symbol", "kurs", "geld", "brief"], papiere),
                                    ("kurse.csv", ["zeit", "wert", "gewinn"], verlauf_)):
-            with pfad(name).open("w", newline="", encoding="utf-8") as f:
+            with (ordner / name).open("w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerows([kopf] + zeilen)
-    return depot
+    print(f"Depot angelegt: {ordner}")
+    return "haupt"
 
 
 def main():
@@ -840,14 +1081,19 @@ def main():
     ap.add_argument("--demo", action="store_true", help="erfundene Kurse und Analystendaten, eigenes Demo-Depot")
     args = ap.parse_args()
 
-    if args.demo:
-        DEMO[0], DATEN[0] = True, HIER / "demo"
-    depot = depot_laden()
-    Server.depot = depot
+    DEMO[0] = args.demo
+    depots.BASIS[0] = HIER / "demo" if args.demo else HIER
+    depots.BASIS[0].mkdir(exist_ok=True)
+    if depots.uebernehmen():
+        print("Bisheriges Depot übernommen nach depots/haupt/")
+    ix = depots.index()
+    aktiv = ix["aktiv"] if ix["depots"] else erstes_depot()
+    with SPERRE:
+        depot_oeffnen(aktiv)
     demokurse = demo.Kurse() if args.demo else None
     if args.demo:
-        Analyse.auffrischen(depot.get("universum", UNIVERSUM))
-    threading.Thread(target=Analyse.schleife, args=(lambda: depot.get("universum", UNIVERSUM),), daemon=True).start()
+        Analyse.auffrischen(Server.depot.get("universum", UNIVERSUM))
+    threading.Thread(target=Analyse.schleife, args=(lambda: Server.depot.get("universum", UNIVERSUM),), daemon=True).start()
 
     server = ThreadingHTTPServer(("0.0.0.0" if args.offen else "127.0.0.1", args.port), Server)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -859,21 +1105,25 @@ def main():
     try:
         while True:
             beginn = time.time()
-            universum = depot.get("universum", UNIVERSUM)
+            WECKER.clear()
+            universum = list(Server.depot.get("universum", UNIVERSUM))
             stand = demokurse.holen(universum) if demokurse else kurse(universum)
             with SPERRE:
-                Server.letzte = stand
+                depot = Server.depot                      # kann zwischendurch gewechselt worden sein
+                Server.letzte = {**Server.letzte, **stand}
                 sparplaene_ausfuehren(depot, stand)
-                b = bewerten(depot, stand)
-                if meldungen_pruefen(depot, b):
-                    b = bewerten(depot, stand)
+                auftraege_ausfuehren(depot, Server.letzte)
+                b = bewerten(depot, Server.letzte)
+                if meldungen_pruefen(depot, b) + alarme_pruefen(depot, Server.letzte, b) + wochenbericht_melden(depot):
+                    b = bewerten(depot, Server.letzte)
                 Server.zustand = b
             # Protokoll höchstens alle 30 Sekunden und nur zur Handelszeit
             if b["offen"] and time.time() - letzte_protokollzeit > 30:
                 protokollieren(b, stand)
+                depots.wert_merken(AKTIV[0], b["wert"], b["gv"])
                 letzte_protokollzeit = time.time()
             dauer = time.time() - beginn                     # Takt halten: Laufzeit dieses Durchlaufs abziehen
-            time.sleep(max(1.0, (args.takt if b["offen"] else max(args.takt, 300)) - dauer))
+            WECKER.wait(max(1.0, (args.takt if b["offen"] else max(args.takt, 300)) - dauer))
     except KeyboardInterrupt:
         print("\nBeendet.")
 

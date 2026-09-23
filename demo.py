@@ -29,15 +29,18 @@ ANALYSTEN = {
     "AMZN": {"stark_kaufen": 24, "kaufen": 44, "halten": 5, "verkaufen": 1, "stark_verkaufen": 0,
              "mittel": 1.6, "anzahl": 74, "kursziel": 285.0, "kursziel_hoch": 330.0,
              "kursziel_tief": 215.0, "kurs": 246.5, "rev_hoch": 18, "rev_runter": 3,
-             "eps_jetzt": 7.12, "eps_vor90": 6.81, "zahlen_in": 36},
+             "eps_jetzt": 7.12, "eps_vor90": 6.81, "zahlen_in": 36,
+             "kgv_erwartet": 31.2, "peg": 1.45, "fcf_rendite": 2.6},
     "META": {"stark_kaufen": 14, "kaufen": 40, "halten": 10, "verkaufen": 2, "stark_verkaufen": 1,
              "mittel": 1.9, "anzahl": 67, "kursziel": 760.0, "kursziel_hoch": 900.0,
              "kursziel_tief": 540.0, "kurs": 720.0, "rev_hoch": 9, "rev_runter": 7,
-             "eps_jetzt": 27.4, "eps_vor90": 27.1, "zahlen_in": 34},
+             "eps_jetzt": 27.4, "eps_vor90": 27.1, "zahlen_in": 34,
+             "kgv_erwartet": 23.8, "peg": 1.3, "fcf_rendite": 3.9},
     "MSFT": {"stark_kaufen": 12, "kaufen": 38, "halten": 8, "verkaufen": 0, "stark_verkaufen": 0,
              "mittel": 1.8, "anzahl": 58, "kursziel": 560.0, "kursziel_hoch": 650.0,
              "kursziel_tief": 470.0, "kurs": 490.0, "rev_hoch": 4, "rev_runter": 11,
-             "eps_jetzt": 14.2, "eps_vor90": 14.6, "zahlen_in": 5},
+             "eps_jetzt": 14.2, "eps_vor90": 14.6, "zahlen_in": 5,
+             "kgv_erwartet": 29.5, "peg": 2.2, "fcf_rendite": 2.4},
 }
 
 
@@ -99,6 +102,8 @@ def analysten(symbol: str, heute: date) -> dict | None:
              "stark_verkaufen": zahlen[4], "mittel": None, "anzahl": sum(zahlen), "kursziel": round(ziel, 2),
              "kursziel_hoch": round(ziel * 1.2, 2), "kursziel_tief": round(ziel * 0.75, 2), "kurs": kurs,
              "rev_hoch": rnd.randint(0, 12), "rev_runter": rnd.randint(0, 12), "zahlen_in": rnd.randint(3, 80),
+             "kgv_erwartet": round(rnd.uniform(9, 40), 1), "peg": round(rnd.uniform(0.8, 3.2), 2),
+             "fcf_rendite": round(rnd.uniform(0.5, 7), 1),
              "waehrung": "EUR"}
     a = dict(a)
     a["zahlen"] = (heute + timedelta(days=a.pop("zahlen_in"))).isoformat()
