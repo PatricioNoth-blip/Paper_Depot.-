@@ -23,7 +23,7 @@
   <button type="button" class="nav-item" id="navMeld"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span>Mitteilungen</span><span class="nav-zahl rot" id="navMeldZahl" hidden></span></button>
   <button type="button" class="nav-item" id="navProfil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8"/></svg><span>Einstellungen</span></button>
   <div class="nav-unten">
-    <button type="button" class="lk hell" id="nSuche"><span>Suche</span><kbd>/</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg></button>
+    <button type="button" class="lk hell" id="nSuche"><span>Suche</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg></button>
     <button type="button" class="lk hell" id="nUeberweisen"><span>Überweisen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5"/></svg></button>
     <p class="nav-fuss">Simulation mit Spielgeld · keine echten Orders, keine Anlageberatung.</p>
   </div>
@@ -35,7 +35,7 @@
       <button type="button" class="tab" data-s="portfolio" aria-current="page">Portfolio</button>
       <button type="button" class="tab" data-s="cash">Cash</button>
     </nav>
-    <button type="button" class="suchknopf" id="suchknopf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg><span>Wertpapier suchen</span><kbd>/</kbd></button>
+    <button type="button" class="suchknopf" id="suchknopf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg><span>Aktie suchen</span></button>
     <div class="kopf-rechts">
       <span class="status" title="Handelsplatz Tradegate"><span class="led" id="led"></span><span id="ledtext">verbinde …</span></span>
       <button type="button" class="glocke" id="glocke" aria-label="Mitteilungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="zahl-punkt" id="glockeZahl" hidden></span></button>
@@ -50,7 +50,6 @@
         <div class="hero">
           <div class="label">Brokerage</div>
           <div class="hero-zeile"><div class="gross" id="pfWert">–</div><div class="delta flat" id="pfDelta"></div></div>
-          <div class="hero-klein nur-breit" id="pfKlein"></div>
         </div>
         <div class="zeitraum" id="pfRaum" role="group" aria-label="Zeitraum"></div>
       </div>
@@ -60,7 +59,6 @@
         <button type="button" class="kachel" id="kSpar"><span class="k-titel">Sparpläne</span><span class="k-wert" id="kSparWert">–</span></button>
         <button type="button" class="kachel" id="kOrder" aria-label="Neue Order"><span class="k-titel">Order</span><span class="k-plus" aria-hidden="true">+</span></button>
       </div>
-      <div class="kpis nur-breit" id="pfKpis"></div>
       <div class="block">
         <div class="block-kopf"><h2>Investments</h2><button type="button" class="umschalter nur-schmal" id="pfModus"></button><span class="t-klein nur-breit" id="pfAnzahl"></span></div>
         <div class="liste nur-schmal" id="pfListe"></div>
@@ -76,11 +74,6 @@
           <tbody id="pfTabelle"></tbody>
         </table></div>
       </div>
-      <div class="block nur-schmal">
-        <div class="block-kopf"><h2>Übersicht</h2></div>
-        <div class="karte" id="pfUebersicht"></div>
-      </div>
-      <p class="fuss" id="pfFuss"></p>
     </section>
 
     <!-- ===== Cash ===== -->
@@ -92,10 +85,7 @@
         </div>
         <button type="button" class="lk hell nur-breit" id="cUeberweisen" style="min-width:250px"><span>Überweisen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5"/></svg></button>
       </div>
-      <div class="kacheln vier">
-        <div class="kachel statisch"><span class="k-titel">Eingezahlt</span><span class="k-wert" id="cEing">–</span></div>
-        <div class="kachel statisch"><span class="k-titel">Gebühren</span><span class="k-wert" id="cGeb">–</span></div>
-        <div class="kachel statisch"><span class="k-titel">Realisiert</span><span class="k-wert" id="cReal">–</span></div>
+      <div class="kacheln nur-schmal">
         <button type="button" class="kachel" id="kAnalytics"><span class="k-titel">Analytics</span><span class="punkte" aria-hidden="true"><i></i><i></i><i></i></span></button>
       </div>
       <div class="block">
@@ -110,7 +100,6 @@
           <tbody id="umsTabelle"></tbody>
         </table></div>
       </div>
-      <p class="fuss">Dein <b>Paperdepot</b> ist eine Simulation mit Spielgeld. Es werden keine echten Überweisungen oder Orders ausgeführt.</p>
     </section>
 
     <!-- ===== Analytics ===== -->
@@ -123,7 +112,6 @@
         </div>
         <button type="button" class="s-icon nur-schmal" id="anZurueck" aria-label="Zurück zu Cash" style="justify-self:end;margin-top:-4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
-      <div class="kpis" id="anKpis"></div>
       <div class="panel">
         <div class="panel-kopf"><h3>Buy-the-Dip-Radar</h3><span class="t-klein">Rücksetzer deiner Watchlist · mit Mitteilung</span></div>
         <div id="anDip"></div>
@@ -141,7 +129,6 @@
         <div class="panel"><div class="panel-kopf"><h3>Aufteilung</h3><span class="t-klein" id="anAufteilungInfo"></span></div><div class="donut-box" id="anDonut"></div></div>
         <div class="panel"><div class="panel-kopf"><h3>Gewinn/Verlust je Position</h3></div><div id="anBalken"></div></div>
       </div>
-      <p class="fuss">Die Einschätzung fasst acht technische Indikatoren (60 %, nach Trendstärke gewichtet) und die Analystenmeinungen inkl. Gewinnrevisionen (40 %) zu einem Score von 0 bis 100 zusammen. Sie ist regelbasiert und keine Anlageberatung.</p>
     </section>
 
     <!-- ===== Wertpapier ===== -->
@@ -193,7 +180,7 @@
   </div>
   <div class="rail-stapel" id="railWert" hidden>
     <div class="panel ticket">
-      <div class="ticket-kopf"><h3>Handeln</h3><span class="kbds" title="Tastenkürzel: K = Kaufen, V = Verkaufen, S = Sparplan"><kbd>K</kbd><kbd>V</kbd><kbd>S</kbd></span></div>
+      <div class="ticket-kopf"><h3>Handeln</h3></div>
       <div id="ticketBox"></div>
     </div>
     <div class="panel" id="rPlan"></div>

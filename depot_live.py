@@ -30,6 +30,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time as uhrzeit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -159,13 +160,14 @@ def hole_kurs(isin: str) -> dict:
 
 
 def kurse(universum: list) -> dict:
-    out = {}
-    for p in universum:
+    """Alle Kurse parallel holen (höchstens 6 gleichzeitig), damit der Takt auch bei vielen Aktien hält."""
+    def eins(p):
         try:
-            out[p["symbol"]] = hole_kurs(p["isin"])
+            return p["symbol"], hole_kurs(p["isin"])
         except Exception as fehler:                         # Netz weg: nichts erfinden
-            out[p["symbol"]] = {"fehler": str(fehler)}
-    return out
+            return p["symbol"], {"fehler": str(fehler)}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return dict(pool.map(eins, universum))
 
 
 # --- Analyse je Aktie (läuft automatisch im Hintergrund) --------------------
@@ -856,6 +858,7 @@ def main():
     letzte_protokollzeit = 0.0
     try:
         while True:
+            beginn = time.time()
             universum = depot.get("universum", UNIVERSUM)
             stand = demokurse.holen(universum) if demokurse else kurse(universum)
             with SPERRE:
@@ -869,7 +872,8 @@ def main():
             if b["offen"] and time.time() - letzte_protokollzeit > 30:
                 protokollieren(b, stand)
                 letzte_protokollzeit = time.time()
-            time.sleep(args.takt if b["offen"] else max(args.takt, 300))
+            dauer = time.time() - beginn                     # Takt halten: Laufzeit dieses Durchlaufs abziehen
+            time.sleep(max(1.0, (args.takt if b["offen"] else max(args.takt, 300)) - dauer))
     except KeyboardInterrupt:
         print("\nBeendet.")
 

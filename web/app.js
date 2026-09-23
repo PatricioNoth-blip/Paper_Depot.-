@@ -866,9 +866,6 @@ function malePortfolio() {
   let delta = stand.gv, basis = stand.eingezahlt;
   if (raumPf !== 'MAX' && daten.length) { delta = stand.gv - daten[0].v; basis = daten[0].w; }
   deltaSetzen($('pfDelta'), delta, basis ? delta / basis * 100 : null);
-  const kl = $('pfKlein'); kl.textContent = '';
-  kl.append('Gesamt inkl. Cash ', el('b', null, geld(stand.wert)), ' · Eingezahlt ', el('b', null, geld(stand.eingezahlt)),
-    ' · ' + ({'1T': 'heute', '1W': 'seit 1 Woche', '1M': 'seit 1 Monat', '1J': 'seit 1 Jahr', MAX: 'seit Start'})[raumPf]);
   raumPfMalen();
   chartMalen('pf', daten);
   $('kWatchWert').textContent = (stand.universum || []).length;
@@ -893,38 +890,12 @@ function malePortfolio() {
     sortiert.forEach(z => tb.append(positionZeileTabelle(z, gesamt)));
     if (!sortiert.length) { const tr = el('tr', 'statisch'); const td = el('td', 'leer', 'Noch keine Investments.'); td.colSpan = 6; tr.append(td); tb.append(tr); }
   });
-  // Kennzahlen (breite Ansicht)
-  const aktivePlaene = (stand.sparplaene || []).filter(p => p.aktiv !== false);
-  ersetzeWennNeu($('pfKpis'), JSON.stringify([stand.wert, stand.cash, stand.gv, stand.realisiert, stand.eingezahlt, stand.gebuehren, zeilen.length, summe]), box => {
-    kpi(box, 'Gesamtwert', geld(stand.wert), '', 'Wertpapiere + Cash');
-    kpi(box, 'Cash', geld(stand.cash), '', stand.wert ? ZAHL1.format(stand.cash / stand.wert * 100) + ' % vom Depot' : '');
-    kpi(box, 'Gewinn gesamt', vz(stand.gv), richtung(stand.gv), vzp(stand.gvp) + ' auf Einzahlungen');
-    kpi(box, 'Realisiert', vz(stand.realisiert || 0), stand.realisiert ? richtung(stand.realisiert) : '', 'aus Verkäufen');
-    kpi(box, 'Eingezahlt', geld(stand.eingezahlt), '', 'netto, alle Buchungen');
-    kpi(box, 'Ordergebühren', geld(stand.gebuehren), '', (stand.orders || []).length + ' Orders');
-    kpi(box, 'Positionen', String(zeilen.length), '', (stand.universum || []).length + ' in der Watchlist');
-    kpi(box, 'Sparpläne', geldKurz(summe), '', aktivePlaene.length ? 'pro Monat · ' + aktivePlaene.length + (aktivePlaene.length === 1 ? ' Plan' : ' Pläne') : 'keiner aktiv');
-  });
-  ersetzeWennNeu($('pfUebersicht'), JSON.stringify([stand.aktien, stand.cash, stand.eingezahlt, stand.gebuehren, stand.realisiert, stand.gv]), ue => {
-    reihe(ue, 'Wertpapiere', geld(stand.aktien));
-    reihe(ue, 'Cash', geld(stand.cash));
-    reihe(ue, 'Gesamtwert', geld(stand.wert));
-    reihe(ue, 'Eingezahlt', geld(stand.eingezahlt));
-    reihe(ue, 'Ordergebühren', geld(stand.gebuehren));
-    if (stand.realisiert) reihe(ue, 'Realisiert', vz(stand.realisiert), richtung(stand.realisiert));
-    reihe(ue, 'Gewinn gesamt', vz(stand.gv) + ' (' + vzp(stand.gvp) + ')', richtung(stand.gv));
-  });
-  $('pfFuss').textContent = stand.handelsplatz + ' · Mo–Fr ' + stand.handel_von + '–' + stand.handel_bis + ' Uhr · Kurse von '
-    + new Date(stand.zeit).toLocaleTimeString('de-DE') + ' Uhr · Paperdepot: Simulation mit Spielgeld, keine echten Orders.';
 }
 
 /* ---------- Cash ---------- */
 const FILTER = [['alle', 'Alle'], ['kauf', 'Käufe'], ['verkauf', 'Verkäufe'], ['sparplan', 'Sparpläne'], ['einzahlung', 'Einzahlungen'], ['auszahlung', 'Auszahlungen']];
 function maleCash() {
   $('cashWert').textContent = geld(stand.cash);
-  $('cEing').textContent = geld(stand.eingezahlt);
-  $('cGeb').textContent = geld(stand.gebuehren);
-  const r = $('cReal'); r.textContent = vz(stand.realisiert || 0); r.className = 'k-wert ' + (stand.realisiert ? richtung(stand.realisiert) : '');
   const alle = umsaetze();
   const liste = alle.slice(0, 12);
   ersetzeWennNeu($('cashListe'), (hervorheben || '') + JSON.stringify(liste.map(u => [u.zeit, u.fluss, u.titel])), box => {
@@ -1208,13 +1179,6 @@ function maleAnalytics() {
   const g = $('anGewinn'); g.textContent = vz(stand.gv); g.className = 'gross ' + richtung(stand.gv);
   deltaSetzen($('anRendite'), 0, stand.gvp, true);
   const pos = stand.zeilen || [];
-  const unreal = pos.reduce((s, z) => s + (z.gv || 0), 0);
-  ersetzeWennNeu($('anKpis'), JSON.stringify([unreal, stand.realisiert, stand.gebuehren, stand.cash, stand.wert]), box => {
-    kpi(box, 'Unrealisiert', vz(unreal), richtung(unreal), pos.length + ' offene Positionen');
-    kpi(box, 'Realisiert', vz(stand.realisiert || 0), stand.realisiert ? richtung(stand.realisiert) : '', 'aus Verkäufen');
-    kpi(box, 'Gebühren', geld(stand.gebuehren), '', (stand.orders || []).length + ' Orders');
-    kpi(box, 'Cash-Quote', stand.wert ? ZAHL1.format(stand.cash / stand.wert * 100) + ' %' : '–', '', geld(stand.cash) + ' nicht investiert');
-  });
   ersetzeWennNeu($('anAktien'), JSON.stringify((stand.universum || []).map(u => { const a = analyseVon(u.symbol) || {}; return [u.symbol, a.score, a.technik, a.analysten_score, quote(u.symbol).last, !!zeileVon(u.symbol), a.dip && a.dip.status]; })), aktienAnalyseListe);
   const dips = (stand.universum || []).map(u => [u, dipVon(u.symbol)]).filter(([, d]) => d);
   ersetzeWennNeu($('anDip'), JSON.stringify(dips.map(([u, d]) => [u.symbol, d.status, Math.round(d.rueckgang * 10), d.erfuellt])), box => {
@@ -1417,7 +1381,7 @@ function maleRail() {
     maleMarktzeit($('rZeit2'));
     const plan = planVon(gewaehlt);
     ersetzeWennNeu($('rPlan'), JSON.stringify([gewaehlt, plan]), box => {
-      const kopf = el('div', 'panel-kopf'); kopf.append(el('h3', null, 'Sparplan'), el('kbd', null, 'S'));
+      const kopf = el('div', 'panel-kopf'); kopf.append(el('h3', null, 'Sparplan'));
       const text = plan ? geld(plan.betrag) + ' monatlich am ' + plan.tag + '.' + (plan.aktiv === false ? ' · pausiert' : ' · nächste ' + datum(plan.naechste))
         : 'Regelmäßig investieren – monatlich und automatisch zum Briefkurs.';
       const p = el('p', 'hero-klein', text); p.style.cssText = 'font-size:15px;margin-bottom:14px;line-height:1.5';

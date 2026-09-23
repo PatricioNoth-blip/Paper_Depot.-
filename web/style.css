@@ -601,3 +601,20 @@ h3{font-size:19px;font-weight:800;margin:28px 0 6px}
 .meldung-reihe.neu-m .r-titel::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--down);margin-left:8px;vertical-align:2px}
 @media (max-width:1100px){ .dip-pruef{grid-template-columns:repeat(2,minmax(0,1fr))} }
 @media (max-width:640px){ .glocke{width:44px;height:44px} .dip-gross b{font-size:28px} }
+
+/* ---------- Hover: Anklickbares wird beim Drüberfahren etwas größer (nur mit Maus) ---------- */
+.sheet,.rail,.seitennav{overflow-x:hidden}
+@media (hover:hover) and (pointer:fine){
+  button,a,.tabelle tbody tr{transition:transform .2s var(--ease),background .15s,color .15s,border-color .15s,opacity .2s,box-shadow .2s}
+  .lk:hover,.knopf:hover:not(:disabled),.glocke:hover,.avatar:hover,.s-icon:hover,.hm-zu:hover,
+  .chip:hover:not(:disabled),.seg:hover,.schnell button:hover:not(:disabled),.zeitraum button:hover,
+  .textknopf:hover,.zurueck-link:hover,.markt:hover,.umschalter:hover,.block-link:hover{transform:scale(1.06)}
+  button.kachel:hover{transform:scale(1.03)}
+  .suchknopf:hover{transform:scale(1.02)}
+  .reihe:hover:not(.statisch),.wl:hover,.aktie-zeile:hover,.dip-zeile:hover,.option:hover,.nav-item:hover{transform:scale(1.025)}
+  .tabelle tbody tr:not(.statisch):hover{transform:scale(1.012)}
+  .tabelle tbody tr:not(.statisch):hover td{border-bottom-color:transparent}
+  .reihe:hover:not(.statisch),.aktie-zeile:hover,.dip-zeile:hover,.wl:hover{box-shadow:0 10px 30px rgba(0,0,0,.45)}
+  .lk:active,.knopf:active:not(:disabled),button.kachel:active,.reihe:active,.chip:active,.glocke:active{transform:scale(.97)}
+  .zeitraum button:hover{background:var(--karte)}
+}
