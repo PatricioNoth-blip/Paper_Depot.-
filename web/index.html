@@ -1,0 +1,226 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>Paperdepot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head><body>
+<div class="demo-band" id="demoBand" hidden>DEMO · erfundene Kurse und Analystendaten zum Ausprobieren · keine echten Marktdaten</div>
+<div class="shell">
+
+<!-- ================= Seitenleiste (Desktop) ================= -->
+<aside class="seitennav" aria-label="Navigation">
+  <div class="marke"><span class="marke-logo" aria-hidden="true">P</span><div><b>Paperdepot</b><small id="navTitel">Spielgeld</small></div></div>
+  <button type="button" class="nav-item" data-s="portfolio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 4-6 5 5"/><path d="M3 21h18"/></svg><span>Portfolio</span></button>
+  <button type="button" class="nav-item" data-s="cash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18"/><path d="M16 15h2"/></svg><span>Cash</span></button>
+  <button type="button" class="nav-item" data-s="analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg><span>Analytics</span></button>
+  <div class="nav-gruppe">Depot</div>
+  <button type="button" class="nav-item" id="navWatch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>Watchlist</span><span class="nav-zahl" id="navWatchZahl"></span></button>
+  <button type="button" class="nav-item" id="navSpar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg><span>Sparpläne</span><span class="nav-zahl" id="navSparZahl"></span></button>
+  <button type="button" class="nav-item" id="navProfil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8"/></svg><span>Einstellungen</span></button>
+  <div class="nav-unten">
+    <button type="button" class="lk hell" id="nSuche"><span>Suche</span><kbd>/</kbd><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg></button>
+    <button type="button" class="lk hell" id="nUeberweisen"><span>Überweisen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5"/></svg></button>
+    <p class="nav-fuss">Simulation mit Spielgeld · keine echten Orders, keine Anlageberatung.</p>
+  </div>
+</aside>
+
+<div class="app">
+  <header class="kopf">
+    <nav class="tabs" aria-label="Bereiche">
+      <button type="button" class="tab" data-s="portfolio" aria-current="page">Portfolio</button>
+      <button type="button" class="tab" data-s="cash">Cash</button>
+    </nav>
+    <button type="button" class="suchknopf" id="suchknopf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg><span>Wertpapier suchen</span><kbd>/</kbd></button>
+    <div class="kopf-rechts">
+      <span class="status" title="Handelsplatz Tradegate"><span class="led" id="led"></span><span id="ledtext">verbinde …</span></span>
+      <button type="button" class="avatar" id="avatar" aria-label="Depot, Einstellungen und Tastenkürzel">P</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===== Portfolio ===== -->
+    <section class="seite" id="seitePortfolio" aria-label="Portfolio">
+      <div class="hero-reihe">
+        <div class="hero">
+          <div class="label">Brokerage</div>
+          <div class="hero-zeile"><div class="gross" id="pfWert">–</div><div class="delta flat" id="pfDelta"></div></div>
+          <div class="hero-klein nur-breit" id="pfKlein"></div>
+        </div>
+        <div class="zeitraum" id="pfRaum" role="group" aria-label="Zeitraum"></div>
+      </div>
+      <div class="chart" id="pfChart"></div>
+      <div class="kacheln nur-schmal">
+        <button type="button" class="kachel" id="kWatch"><span class="k-titel">Watchlist</span><span class="k-wert" id="kWatchWert">–</span></button>
+        <button type="button" class="kachel" id="kSpar"><span class="k-titel">Sparpläne</span><span class="k-wert" id="kSparWert">–</span></button>
+        <button type="button" class="kachel" id="kOrder" aria-label="Neue Order"><span class="k-titel">Order</span><span class="k-plus" aria-hidden="true">+</span></button>
+      </div>
+      <div class="kpis nur-breit" id="pfKpis"></div>
+      <div class="block">
+        <div class="block-kopf"><h2>Investments</h2><button type="button" class="umschalter nur-schmal" id="pfModus"></button><span class="t-klein nur-breit" id="pfAnzahl"></span></div>
+        <div class="liste nur-schmal" id="pfListe"></div>
+        <div class="tabelle-rahmen nur-breit"><table class="tabelle" aria-label="Investments">
+          <thead><tr id="pfThead">
+            <th data-k="name"><button type="button">Wertpapier</button></th>
+            <th class="r opt" data-k="anteile"><button type="button">Anteile</button></th>
+            <th class="r" data-k="kurs"><button type="button">Kurs</button></th>
+            <th class="r" data-k="wert"><button type="button">Wert</button></th>
+            <th data-k="gewicht"><button type="button">Gewichtung</button></th>
+            <th class="r" data-k="gvp"><button type="button">Seit Kauf</button></th>
+          </tr></thead>
+          <tbody id="pfTabelle"></tbody>
+        </table></div>
+      </div>
+      <div class="block nur-schmal">
+        <div class="block-kopf"><h2>Übersicht</h2></div>
+        <div class="karte" id="pfUebersicht"></div>
+      </div>
+      <p class="fuss" id="pfFuss"></p>
+    </section>
+
+    <!-- ===== Cash ===== -->
+    <section class="seite" id="seiteCash" aria-label="Cash" hidden>
+      <div class="hero-reihe">
+        <div class="hero">
+          <div class="label">Verfügbar</div>
+          <div class="gross" id="cashWert">–</div>
+        </div>
+        <button type="button" class="lk hell nur-breit" id="cUeberweisen" style="min-width:250px"><span>Überweisen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5"/></svg></button>
+      </div>
+      <div class="kacheln vier">
+        <div class="kachel statisch"><span class="k-titel">Eingezahlt</span><span class="k-wert" id="cEing">–</span></div>
+        <div class="kachel statisch"><span class="k-titel">Gebühren</span><span class="k-wert" id="cGeb">–</span></div>
+        <div class="kachel statisch"><span class="k-titel">Realisiert</span><span class="k-wert" id="cReal">–</span></div>
+        <button type="button" class="kachel" id="kAnalytics"><span class="k-titel">Analytics</span><span class="punkte" aria-hidden="true"><i></i><i></i><i></i></span></button>
+      </div>
+      <div class="block">
+        <div class="block-kopf">
+          <button type="button" class="block-link" id="alleTransaktionen"><h2>Transaktionen</h2><svg class="nur-schmal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+          <a class="textknopf nur-breit" href="/export.csv" download="paperdepot-umsaetze.csv" style="text-decoration:none">CSV exportieren</a>
+        </div>
+        <div class="filter nur-breit" id="umsFilter" role="group" aria-label="Filter"></div>
+        <div class="liste nur-schmal" id="cashListe"></div>
+        <div class="tabelle-rahmen nur-breit"><table class="tabelle" aria-label="Transaktionen">
+          <thead><tr><th>Datum</th><th>Vorgang</th><th>Details</th><th class="r">Betrag</th></tr></thead>
+          <tbody id="umsTabelle"></tbody>
+        </table></div>
+      </div>
+      <p class="fuss">Dein <b>Paperdepot</b> ist eine Simulation mit Spielgeld. Es werden keine echten Überweisungen oder Orders ausgeführt.</p>
+    </section>
+
+    <!-- ===== Analytics ===== -->
+    <section class="seite" id="seiteAnalytics" aria-label="Analytics" hidden>
+      <div class="hero-reihe">
+        <div class="hero">
+          <div class="label">Analytics · Gewinn gesamt</div>
+          <div class="hero-zeile"><div class="gross" id="anGewinn">–</div><div class="delta flat" id="anRendite"></div></div>
+          <div class="hero-klein">realisiert und unrealisiert, nach Gebühren, seit Start des Depots</div>
+        </div>
+        <button type="button" class="s-icon nur-schmal" id="anZurueck" aria-label="Zurück zu Cash" style="justify-self:end;margin-top:-4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="kpis" id="anKpis"></div>
+      <div class="panel">
+        <div class="panel-kopf"><h3>Aktien-Analyse</h3><span class="t-klein">Indikatoren + Analysten · aktualisiert sich automatisch</span></div>
+        <div id="anAktien"></div>
+      </div>
+      <div class="an-grid">
+        <div class="panel breit2">
+          <div class="panel-kopf"><h3>Depotwert und Einzahlungen</h3>
+            <div class="legende"><span><i style="background:var(--ink)"></i>Depotwert</span><span><i class="gestrichelt"></i>Eingezahlt</span></div></div>
+          <div class="chart" id="anVerlauf"></div>
+        </div>
+        <div class="panel"><div class="panel-kopf"><h3>Aufteilung</h3><span class="t-klein" id="anAufteilungInfo"></span></div><div class="donut-box" id="anDonut"></div></div>
+        <div class="panel"><div class="panel-kopf"><h3>Gewinn/Verlust je Position</h3></div><div id="anBalken"></div></div>
+      </div>
+      <p class="fuss">Die Einschätzung fasst sieben technische Indikatoren (60 %) und die Analystenmeinungen (40 %) zu einem Score von 0 bis 100 zusammen. Sie ist regelbasiert und keine Anlageberatung.</p>
+    </section>
+
+    <!-- ===== Wertpapier ===== -->
+    <section class="seite" id="seiteWert" aria-label="Wertpapier" hidden>
+      <button type="button" class="zurueck-link" id="zurueck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span id="zurueckText">Portfolio</span></button>
+      <div class="hero-reihe">
+        <div class="wp-titel">
+          <div id="wpLogo"></div>
+          <div class="hero">
+            <div class="label" id="wpName">–</div>
+            <div class="hero-zeile"><div class="gross" id="wpKurs">–</div><div class="delta flat" id="wpDelta"></div></div>
+            <div class="hero-klein" id="wpGeldBrief"></div>
+          </div>
+        </div>
+        <div class="zeitraum akzent" id="wpRaum" role="group" aria-label="Zeitraum"></div>
+      </div>
+      <div class="chart" id="wpChart"></div>
+      <div class="kacheln">
+        <div class="kachel statisch"><span class="k-titel">Position</span><span class="k-wert" id="wpPos">–</span></div>
+        <div class="kachel statisch"><span class="k-titel">Performance</span><span class="k-wert" id="wpPerf">–</span></div>
+        <button type="button" class="kachel" id="wpScoreKachel"><span class="k-titel">Einschätzung</span><span class="k-wert" id="wpScoreWert">–</span></button>
+      </div>
+      <div class="block" id="wpAnalyseBlock">
+        <div class="block-kopf"><h2>Analyse</h2><span class="t-klein" id="wpAnalyseStand"></span></div>
+        <div id="wpAnalyse"></div>
+      </div>
+      <div class="wp-unten">
+        <div style="display:grid;gap:36px;min-width:0">
+          <div class="block"><h2>Informationen</h2><p class="info" id="wpInfo"></p></div>
+          <div class="block" id="wpAktBlock"><h2>Aktivität</h2><div class="liste" id="wpAktListe"></div></div>
+        </div>
+        <div class="block"><h2>Wichtigste Statistiken</h2><div class="karte" id="wpStats"></div></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ================= Rechte Leiste (Desktop) ================= -->
+<aside class="rail" id="rail" aria-label="Seitenleiste">
+  <div class="rail-stapel" id="railMarkt">
+    <div class="panel">
+      <div class="label" style="font-size:15px">Cash verfügbar</div>
+      <div class="rail-gross" id="rCashWert">–</div>
+      <button type="button" class="knopf hell breit klein" id="rEinzahlen"><span>Geld einzahlen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    </div>
+    <div class="panel" id="rZeit"></div>
+    <div class="panel"><div class="panel-kopf"><h3>Watchlist</h3><button type="button" class="textknopf" id="rWatchAlle">Alle</button></div><div id="rWatch"></div></div>
+    <div class="panel"><div class="panel-kopf"><h3>Sparpläne</h3><button type="button" class="textknopf" id="rSparAlle">Verwalten</button></div><div id="rSpar"></div></div>
+  </div>
+  <div class="rail-stapel" id="railWert" hidden>
+    <div class="panel ticket">
+      <div class="ticket-kopf"><h3>Handeln</h3><span class="kbds" title="Tastenkürzel: K = Kaufen, V = Verkaufen, S = Sparplan"><kbd>K</kbd><kbd>V</kbd><kbd>S</kbd></span></div>
+      <div id="ticketBox"></div>
+    </div>
+    <div class="panel" id="rPlan"></div>
+    <div class="panel" id="rZeit2"></div>
+  </div>
+</aside>
+</div>
+
+<!-- ================= Schmale Ansicht: Aktionsleisten ================= -->
+<div class="leiste" id="leiste"><div class="leiste-innen">
+  <button type="button" class="lk hell" id="bSuche"><span>Suche</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.3-4.3"/></svg></button>
+  <button type="button" class="lk hell" id="bUeberweisen"><span>Überweisen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 12 5l4.5 4.5M7.5 14.5 12 19l4.5-4.5"/></svg></button>
+</div></div>
+<div class="leiste" id="leisteWp" hidden><div class="leiste-innen">
+  <button type="button" class="lk orange" id="bSparplan"><span>Sparplan</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg></button>
+  <button type="button" class="lk orange" id="bHandeln" aria-haspopup="menu" aria-expanded="false"><span>Handeln</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c2.5 0 3-6 5.5-6s2.5 4 5 4S17 7 21 6"/></svg></button>
+</div></div>
+
+<div class="hm" id="hm" hidden>
+  <div class="hm-back" id="hmBack"></div>
+  <div class="hm-rahmen"><div class="hm-innen"><div class="hm-spalte" role="menu" aria-label="Handeln">
+    <p class="hm-hinweis hm-item" id="hmHinweis"></p>
+    <button type="button" class="lk orange hm-item" id="hmKaufen" role="menuitem"><span>Kaufen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" class="lk orange hm-item" id="hmVerkaufen" role="menuitem"><span>Verkaufen</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+    <button type="button" class="hm-zu hm-item" id="hmZu" aria-label="Menü schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div></div></div>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="ov-back" id="ovBack"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitel"></div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body></html>
